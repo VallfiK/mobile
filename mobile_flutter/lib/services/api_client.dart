@@ -1,10 +1,22 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiClient {
-  static const String baseUrl = 'http://192.168.0.103:8080/api'; // Адрес вашего Go-бэкенда
-  // Используем 10.0.2.2 для доступа к хосту из эмулятора Android
+  // Для iOS симулятора и физических устройств используйте IP вашего компьютера
+  static String get baseUrl {
+    if (Platform.isAndroid) {
+      // Для эмулятора Android
+      return 'http://192.168.0.103:8080/api';
+    } else if (Platform.isIOS) {
+      // Для iOS симулятора используйте IP вашего компьютера
+      return 'http://192.168.0.103:8080/api';  // Замените на ваш локальный IP
+    } else {
+      // Для веб и других платформ
+      return 'http://192.168.0.103:8080/api';
+    }
+  }
   
   final http.Client _client;
   
@@ -30,13 +42,18 @@ class ApiClient {
       ...authHeaders,
     };
 
-    final response = await _client.send(
-      http.Request(method, url)
-        ..headers.addAll(requestHeaders)
-        ..body = body != null ? jsonEncode(body) : '',
-    );
+    try {
+      final response = await _client.send(
+        http.Request(method, url)
+          ..headers.addAll(requestHeaders)
+          ..body = body != null ? jsonEncode(body) : '',
+      );
 
-    return http.Response.fromStream(response);
+      return http.Response.fromStream(response);
+    } catch (e) {
+      print('Network error: $e');
+      rethrow;
+    }
   }
 
   Future<Map<String, String>> _getAuthHeaders() async {

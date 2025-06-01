@@ -78,8 +78,12 @@ class _CalendarViewState extends State<CalendarView> {
                 _focusedDay = focusedDay;
               });
             },
-            eventLoader: (day) => _groupedBookings[day] ?? [],
+            eventLoader: (day) {
+              final bookingsForDay = _groupedBookings[day] ?? [];
+              return bookingsForDay.map((booking) => booking).toList();
+            },
             calendarStyle: CalendarStyle(
+              isTodayHighlighted: true,
               selectedDecoration: BoxDecoration(
                 color: Colors.blue,
                 shape: BoxShape.circle,
@@ -88,6 +92,42 @@ class _CalendarViewState extends State<CalendarView> {
                 color: Colors.blue.withOpacity(0.5),
                 shape: BoxShape.circle,
               ),
+              markerDecoration: BoxDecoration(
+                color: Colors.transparent,
+                shape: BoxShape.circle,
+              ),
+              markersMaxCount: 1,
+              outsideDaysVisible: false,
+            ),
+            calendarBuilders: CalendarBuilders(
+              markerBuilder: (context, date, events) {
+                if (events.isEmpty) return null;
+                
+                final booking = events.first;
+                
+                // Определяем цвет в зависимости от статуса бронирования
+                Color color;
+                if (booking.status == 'booked') {
+                  color = Colors.yellow; // Забронировано
+                } else if (booking.status == 'occupied') {
+                  color = Colors.red; // Занято
+                } else {
+                  color = Colors.green; // Свободно
+                }
+                
+                return Positioned(
+                  right: 1,
+                  bottom: 1,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
           if (_selectedDay != null)
@@ -100,26 +140,47 @@ class _CalendarViewState extends State<CalendarView> {
                     'Бронирования на ${DateFormat('dd MMMM yyyy').format(_selectedDay!)}',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  const SizedBox(height: 16),
-                  ...(_groupedBookings[_selectedDay] ?? []).map((booking) =>
-                    ListTile(
-                      title: Text(
-                        '${DateFormat('dd MMMM yyyy').format(booking.startDate)} - '
-                        '${DateFormat('dd MMMM yyyy').format(booking.endDate)}',
-                      ),
-                    )),
-                  const SizedBox(height: 16),
-                  ...widget.bookings
-                      .where((booking) =>
-                          _selectedDay!.isAfter(booking.startDate) &&
-                          _selectedDay!.isBefore(booking.endDate))
-                      .map((booking) => ListTile(
-                            leading: const Icon(Icons.person),
-                            title: Text('Гостей: ${booking.guests}'),
-                            subtitle: Text(
-                              'С ${DateFormat('dd MMMM yyyy').format(booking.startDate)} по ${DateFormat('dd MMMM yyyy').format(booking.endDate)}',
+                  const SizedBox(height: 8),
+                  ..._groupedBookings[_selectedDay]!
+                      .map((booking) => Card(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: booking.status == 'booked'
+                                    ? Colors.yellow
+                                    : booking.status == 'occupied'
+                                        ? Colors.red
+                                        : Colors.green,
+                                child: Text(booking.guestName[0]),
+                              ),
+                              title: Text(booking.guestName),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'С ${DateFormat('dd MMMM').format(booking.startDate)} по ${DateFormat('dd MMMM').format(booking.endDate)}',
+                                  ),
+                                  if (booking.phone.isNotEmpty)
+                                    Text(
+                                      booking.phone,
+                                      style: TextStyle(color: Colors.grey[600]),
+                                    ),
+                                  if (booking.email.isNotEmpty)
+                                    Text(
+                                      booking.email,
+                                      style: TextStyle(color: Colors.grey[600]),
+                                    ),
+                                ],
+                              ),
+                              trailing: booking.status == 'booked'
+                                  ? IconButton(
+                                      icon: const Icon(Icons.cancel),
+                                      onPressed: () => _showCancellationDialog(booking),
+                                    )
+                                  : null,
                             ),
-                          )),
+                          ))
+                      .toList(),
                 ],
               ),
             ),
