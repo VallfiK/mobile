@@ -7,20 +7,38 @@ class ApiClient {
   // Для iOS симулятора и физических устройств используйте IP вашего компьютера
   static String get baseUrl {
     if (Platform.isAndroid) {
-      // Для эмулятора Android
-      return 'http://192.168.0.103:8080/api';
+      // Для Android устройства
+      return 'http://178.234.13.110:8080/api';
     } else if (Platform.isIOS) {
       // Для iOS симулятора используйте IP вашего компьютера
-      return 'http://192.168.0.103:8080/api';  // Замените на ваш локальный IP
+      return 'http://178.234.13.110:8080/api';
     } else {
       // Для веб и других платформ
-      return 'http://192.168.0.103:8080/api';
+      return 'http://178.234.13.110:8080/api';
     }
   }
-  
+
+  @override
+  void dispose() {
+    _client.close();
+  }
+
+  Future<bool> testConnection() async {
+    try {
+      final response = await _client.get(Uri.parse('${baseUrl}/apiping'));
+      print('Connection test response: ${response.statusCode}');
+      print('Response body: ${response.body}');
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Connection test failed: $e');
+      return false;
+    }
+  }
+
   final http.Client _client;
   
-  ApiClient() : _client = http.Client();
+  ApiClient({http.Client? client}) : _client = client ?? http.Client();
+
 
   Future<String?> getAuthToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -64,31 +82,76 @@ class ApiClient {
     return {};
   }
 
-  Future<http.Response> get(String path, {Map<String, String>? headers}) {
-    return _sendRequest('GET', path, headers: headers);
+  Future<http.Response> get(String path) async {
+    final url = Uri.parse('$baseUrl$path');
+    print('GET $url');
+    print('Full URL: ${url.toString()}');
+    try {
+      print('Sending request...');
+      final response = await _client.get(url);
+      print('Response received');
+      print('Status code: ${response.statusCode}');
+      print('Headers: ${response.headers}');
+      print('Body: ${response.body}');
+      return response;
+    } catch (e) {
+      print('Error occurred: $e');
+      if (e is SocketException) {
+        print('Socket error: ${e.message}');
+      }
+      rethrow;
+    }
   }
 
-  Future<http.Response> post(
-    String path,
-    Map<String, dynamic> body, {
-    Map<String, String>? headers,
-  }) {
-    return _sendRequest('POST', path, body: body, headers: headers);
+  Future<http.Response> post(String path, Map<String, dynamic> body) async {
+    final url = Uri.parse('$baseUrl$path');
+    print('POST $url');
+    print('Body: ${jsonEncode(body)}');
+    try {
+      final response = await _client.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+      return response;
+    } catch (e) {
+      print('Error: $e');
+      rethrow;
+    }
   }
 
-  Future<http.Response> put(
-    String path,
-    Map<String, dynamic> body, {
-    Map<String, String>? headers,
-  }) {
-    return _sendRequest('PUT', path, body: body, headers: headers);
+  Future<http.Response> put(String path, Map<String, dynamic> body) async {
+    final url = Uri.parse('$baseUrl$path');
+    print('PUT $url');
+    print('Body: ${jsonEncode(body)}');
+    try {
+      final response = await _client.put(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+      return response;
+    } catch (e) {
+      print('Error: $e');
+      rethrow;
+    }
   }
 
-  Future<http.Response> delete(String path, {Map<String, String>? headers}) {
-    return _sendRequest('DELETE', path, headers: headers);
-  }
-
-  void dispose() {
-    _client.close();
+  Future<http.Response> delete(String path) async {
+    final url = Uri.parse('$baseUrl$path');
+    print('DELETE $url');
+    try {
+      final response = await _client.delete(url);
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+      return response;
+    } catch (e) {
+      print('Error: $e');
+      rethrow;
+    }
   }
 }

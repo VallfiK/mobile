@@ -24,7 +24,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
   final _formKey = GlobalKey<FormState>();
   DateTime _checkInDate = DateTime.now();
   DateTime? _checkOutDate;
-  int _guests = 1;
   String _name = '';
   String _phone = '';
   String _email = '';
@@ -45,7 +44,7 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
           cottageId: widget.cottageId,
           startDate: _checkInDate,
           endDate: _checkOutDate!,
-          guests: _guests,
+          guests: 1,
           userId: 'current_user_id', // нужно будет получить из аутентификации
         );
 
@@ -124,38 +123,6 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
                   availableDates: [], // TODO: Получить доступные даты с сервера
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        decoration: const InputDecoration(
-                          labelText: 'Количество гостей',
-                          prefixIcon: Icon(Icons.people),
-                        ),
-                        initialValue: _guests.toString(),
-                        keyboardType: TextInputType.number,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Введите количество гостей';
-                          }
-                          final guests = int.tryParse(value);
-                          if (guests == null || guests < 1) {
-                            return 'Введите корректное количество гостей';
-                          }
-                          if (guests > widget.cottage.capacity) {
-                            return 'Превышен лимит гостей';
-                          }
-                          return null;
-                        },
-                        onChanged: (value) {
-                          final guests = int.tryParse(value);
-                          if (guests != null && guests > 0) {
-                            setState(() => _guests = guests);
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 16),
                     Text(
                       'Максимум ${widget.cottage.capacity} гостей',
                       style: Theme.of(context).textTheme.bodyMedium,

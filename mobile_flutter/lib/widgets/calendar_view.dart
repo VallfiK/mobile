@@ -92,12 +92,12 @@ class _CalendarViewState extends State<CalendarView> {
                 color: Colors.blue.withOpacity(0.5),
                 shape: BoxShape.circle,
               ),
-              markerDecoration: BoxDecoration(
-                color: Colors.transparent,
-                shape: BoxShape.circle,
-              ),
               markersMaxCount: 1,
               outsideDaysVisible: false,
+              cellMargin: const EdgeInsets.all(4),
+              cellPadding: const EdgeInsets.all(6),
+              weekendTextStyle: const TextStyle(color: Colors.red),
+              holidayTextStyle: const TextStyle(color: Colors.blue),
             ),
             calendarBuilders: CalendarBuilders(
               markerBuilder: (context, date, events) {
@@ -108,11 +108,11 @@ class _CalendarViewState extends State<CalendarView> {
                 // Определяем цвет в зависимости от статуса бронирования
                 Color color;
                 if (booking.status == 'booked') {
-                  color = Colors.yellow; // Забронировано
+                  color = Colors.yellow;
                 } else if (booking.status == 'occupied') {
-                  color = Colors.red; // Занято
+                  color = Colors.red;
                 } else {
-                  color = Colors.green; // Свободно
+                  color = Colors.green;
                 }
                 
                 return Positioned(
@@ -137,7 +137,7 @@ class _CalendarViewState extends State<CalendarView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Бронирования на ${DateFormat('dd MMMM yyyy').format(_selectedDay!)}',
+                    'Bookings on ${DateFormat('dd MMMM yyyy').format(_selectedDay!)}',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
@@ -158,16 +158,22 @@ class _CalendarViewState extends State<CalendarView> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'С ${DateFormat('dd MMMM').format(booking.startDate)} по ${DateFormat('dd MMMM').format(booking.endDate)}',
+                                    'Cost: ${booking.totalCost.toStringAsFixed(2)} rub',
+                                    style: TextStyle(color: Colors.grey[600]),
                                   ),
-                                  if (booking.phone.isNotEmpty)
+                                  if (booking.guestPhone.isNotEmpty)
                                     Text(
-                                      booking.phone,
+                                      booking.guestPhone,
                                       style: TextStyle(color: Colors.grey[600]),
                                     ),
-                                  if (booking.email.isNotEmpty)
+                                  if (booking.guestEmail.isNotEmpty)
                                     Text(
-                                      booking.email,
+                                      booking.guestEmail,
+                                      style: TextStyle(color: Colors.grey[600]),
+                                    ),
+                                  if (booking.notes.isNotEmpty)
+                                    Text(
+                                      booking.notes,
                                       style: TextStyle(color: Colors.grey[600]),
                                     ),
                                 ],
@@ -181,6 +187,41 @@ class _CalendarViewState extends State<CalendarView> {
                             ),
                           ))
                       .toList(),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Colors:',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  Row(
+                    children: [
+                      Icon(Icons.circle, size: 12, color: Colors.yellow),
+                      SizedBox(width: 4),
+                      Text(
+                        'Yellow - Booked',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Icon(Icons.circle, size: 12, color: Colors.red),
+                      SizedBox(width: 4),
+                      Text(
+                        'Red - Occupied',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Icon(Icons.circle, size: 12, color: Colors.green),
+                      SizedBox(width: 4),
+                      Text(
+                        'Green - Available',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

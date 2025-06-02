@@ -19,8 +19,6 @@ class BookingFilters extends StatefulWidget {
 class _BookingFiltersState extends State<BookingFilters> {
   DateTime? _startDate;
   DateTime? _endDate;
-  int? _minGuests;
-  int? _maxGuests;
 
   void _applyFilters() {
     List<Booking> filteredBookings = widget.bookings;
@@ -33,18 +31,6 @@ class _BookingFiltersState extends State<BookingFilters> {
     if (_endDate != null) {
       filteredBookings = filteredBookings.where((booking) =>
           booking.startDate.isBefore(_endDate!)).toList();
-    }
-
-    if (_minGuests != null) {
-      filteredBookings = filteredBookings
-          .where((booking) => booking.guests >= _minGuests!)
-          .toList();
-    }
-
-    if (_maxGuests != null) {
-      filteredBookings = filteredBookings
-          .where((booking) => booking.guests <= _maxGuests!)
-          .toList();
     }
 
     widget.onFilterApplied(filteredBookings);
@@ -111,44 +97,6 @@ class _BookingFiltersState extends State<BookingFilters> {
 
                       if (picked != null) {
                         setState(() => _endDate = picked);
-                        _applyFilters();
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Минимальное количество гостей',
-                      prefixIcon: Icon(Icons.people),
-                    ),
-                    keyboardType: TextInputType.number,
-                    onChanged: (value) {
-                      final guests = int.tryParse(value);
-                      if (guests != null && guests > 0) {
-                        setState(() => _minGuests = guests);
-                        _applyFilters();
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Максимальное количество гостей',
-                      prefixIcon: Icon(Icons.people),
-                    ),
-                    keyboardType: TextInputType.number,
-                    onChanged: (value) {
-                      final guests = int.tryParse(value);
-                      if (guests != null && guests > 0) {
-                        setState(() => _maxGuests = guests);
                         _applyFilters();
                       }
                     },

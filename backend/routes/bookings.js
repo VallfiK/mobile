@@ -48,15 +48,17 @@ router.get('/calendar/:cottageId/:startDate/:endDate', async (req, res) => {
         
         // Get bookings for the cottage in the date range
         const { rows: bookings } = await pool.query(
-            `SELECT b.*, c.name as cottage_name 
+            `SELECT b.*, c.name as cottage_name, t.name as tariff_name, t.price as tariff_price
             FROM lesbaza.bookings b 
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
+            LEFT JOIN lesbaza.tariffs t ON b.tariff_id = t.tariff_id
             WHERE b.cottage_id = $1 
             AND (
                 ($2::date BETWEEN check_in_date AND check_out_date) 
                 OR ($3::date BETWEEN check_in_date AND check_out_date)
                 OR (check_in_date BETWEEN $2::date AND $3::date)
-            )`,
+            )
+            ORDER BY b.check_in_date`,
             [cottageId, startDate, endDate]
         );
 
@@ -76,29 +78,32 @@ router.get('/calendar/:cottageId/:startDate/:endDate', async (req, res) => {
         bookings.forEach(booking => {
             const checkIn = new Date(booking.check_in_date);
             const checkOut = new Date(booking.check_out_date);
-            
-            // Mark check-in day
             const checkInDate = checkIn.toISOString().split('T')[0];
-            if (calendar[checkInDate]) {
-                calendar[checkInDate][booking.cottage_id] = {
-                    status: booking.status,
-                    bookingId: booking.id,
-                    guestName: booking.guest_name,
-                    isCheckIn: true,
-                    isPartDay: true
-                };
-            }
-
-            // Mark check-out day
             const checkOutDate = checkOut.toISOString().split('T')[0];
-            if (calendar[checkOutDate]) {
-                calendar[checkOutDate][booking.cottage_id] = {
-                    status: booking.status,
-                    bookingId: booking.id,
-                    guestName: booking.guest_name,
-                    isCheckOut: true,
-                    isPartDay: true
-                };
+
+            // Mark all days of the booking period
+            for (let d = new Date(checkIn); d <= checkOut; d.setDate(d.getDate() + 1)) {
+                const date = d.toISOString().split('T')[0];
+                if (calendar[date]) {
+                    calendar[date][booking.cottage_id] = {
+                        status: booking.status,
+                        bookingId: booking.id,
+                        guestName: booking.guest_name,
+                        phone: booking.phone,
+                        email: booking.email,
+                        checkIn: checkInDate,
+                        checkOut: checkOutDate,
+                        tariff: {
+                            name: booking.tariff_name,
+                            price: booking.tariff_price
+                        },
+                        totalCost: booking.total_cost,
+                        notes: booking.notes,
+                        isCheckIn: date === checkInDate,
+                        isCheckOut: date === checkOutDate,
+                        isPartDay: date === checkInDate || date === checkOutDate
+                    };
+                }
             }
 
             // Mark all days in between

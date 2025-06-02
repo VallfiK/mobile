@@ -3,38 +3,41 @@ class Booking {
   final String cottageId;
   final DateTime startDate;
   final DateTime endDate;
-  final int guests;
   final String userId;
   final String status;
   final String guestName;
-  final String phone;
-  final String email;
+  final String guestPhone;
+  final String guestEmail;
+  final double totalCost;
+  final String notes;
 
   Booking({
     required this.id,
     required this.cottageId,
     required this.startDate,
     required this.endDate,
-    required this.guests,
     required this.userId,
     this.status = 'free',
     this.guestName = '',
-    this.phone = '',
-    this.email = '',
+    this.guestPhone = '',
+    this.guestEmail = '',
+    required this.totalCost,
+    this.notes = '',
   });
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     return Booking(
       id: json['id'] ?? '',
       cottageId: json['cottageId'] ?? '',
-      startDate: DateTime.parse(json['startDate'] ?? DateTime.now().toIso8601String()),
-      endDate: DateTime.parse(json['endDate'] ?? DateTime.now().toIso8601String()),
-      guests: json['guests'] ?? 0,
+      startDate: DateTime.parse(json['checkIn'] ?? DateTime.now().toIso8601String()),
+      endDate: DateTime.parse(json['checkOut'] ?? DateTime.now().toIso8601String()),
       userId: json['userId'] ?? '',
       status: json['status'] ?? 'free',
       guestName: json['guestName'] ?? '',
-      phone: json['phone'] ?? '',
-      email: json['email'] ?? '',
+      guestPhone: json['guestPhone'] ?? '',
+      guestEmail: json['guestEmail'] ?? '',
+      totalCost: (json['totalCost'] as num?)?.toDouble() ?? 0.0,
+      notes: json['notes'] ?? '',
     );
   }
 
@@ -42,14 +45,15 @@ class Booking {
     return {
       'id': id,
       'cottageId': cottageId,
-      'startDate': startDate.toIso8601String(),
-      'endDate': endDate.toIso8601String(),
-      'guests': guests,
+      'checkIn': startDate.toIso8601String(),
+      'checkOut': endDate.toIso8601String(),
       'userId': userId,
       'status': status,
       'guestName': guestName,
-      'phone': phone,
-      'email': email,
+      'guestPhone': guestPhone,
+      'guestEmail': guestEmail,
+      'totalCost': totalCost,
+      'notes': notes,
     };
   }
 }

@@ -25,8 +25,7 @@ class BookingCancellationDialog extends StatelessWidget {
           Text(
             'Вы уверены, что хотите отменить бронирование?\n\n'
             'Дата заезда: ${DateFormat('dd MMMM yyyy').format(booking.startDate)}\n'
-            'Дата выезда: ${DateFormat('dd MMMM yyyy').format(booking.endDate)}\n'
-            'Количество гостей: ${booking.guests} человек',
+            'Дата выезда: ${DateFormat('dd MMMM yyyy').format(booking.endDate)}',
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 16),
