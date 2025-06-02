@@ -11,18 +11,18 @@ const pool = new Pool({
 router.get('/', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            'SELECT cottage_id as id, name, status FROM lesbaza.cottages ORDER BY cottage_id'
+            'SELECT cottage_id, name, status FROM lesbaza.cottages ORDER BY cottage_id'
         );
         
         // Преобразуем данные для совместимости с Flutter моделью
         const cottages = rows.map(row => ({
-            id: row.id.toString(),
-            name: row.name || '',
-            description: '', // Устанавливаем пустую строку вместо несуществующей колонки
-            price: 0, // Устанавливаем 0 вместо несуществующей колонки
-            images: [], // Устанавливаем пустой массив вместо несуществующей колонки
-            capacity: 0, // Устанавливаем 0 вместо несуществующей колонки
-            status: row.status
+            id: row.cottage_id.toString(),
+            name: row.name || `Домик ${row.cottage_id}`,
+            description: 'Уютный домик для отдыха',
+            price: 5000, // Фиксированная цена, так как в БД нет этого поля
+            images: [], // Пустой массив изображений
+            capacity: 4, // Фиксированная вместимость
+            status: row.status || 'free'
         }));
         
         res.json(cottages);
@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            'SELECT cottage_id as id, name, status FROM lesbaza.cottages WHERE cottage_id = $1',
+            'SELECT cottage_id, name, status FROM lesbaza.cottages WHERE cottage_id = $1',
             [req.params.id]
         );
         
@@ -45,13 +45,13 @@ router.get('/:id', async (req, res) => {
         }
         
         const cottage = {
-            id: rows[0].id.toString(),
-            name: rows[0].name || '',
-            description: '', // Устанавливаем пустую строку вместо null
-            price: 0, // Устанавливаем 0 вместо null
-            images: [], // Устанавливаем пустой массив вместо null
-            capacity: 0, // Устанавливаем 0 вместо null
-            status: rows[0].status
+            id: rows[0].cottage_id.toString(),
+            name: rows[0].name || `Домик ${rows[0].cottage_id}`,
+            description: 'Уютный домик для отдыха на берегу озера. Идеально подходит для семейного отдыха.',
+            price: 5000, // Фиксированная цена
+            images: [], // Пустой массив изображений
+            capacity: 4, // Фиксированная вместимость
+            status: rows[0].status || 'free'
         };
         
         res.json(cottage);
@@ -62,21 +62,21 @@ router.get('/:id', async (req, res) => {
 });
 
 // Get free cottages
-router.get('/free', async (req, res) => {
+router.get('/status/free', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            'SELECT cottage_id as id, name, description, price, images, capacity, status FROM lesbaza.cottages WHERE status = $1',
+            'SELECT cottage_id, name, status FROM lesbaza.cottages WHERE status = $1',
             ['free']
         );
         
         // Преобразуем данные для совместимости с Flutter моделью
         const cottages = rows.map(row => ({
-            id: row.id.toString(),
-            name: row.name || '',
-            description: row.description || '',
-            price: row.price || 0,
-            images: row.images ? JSON.parse(row.images) : [],
-            capacity: row.capacity || 0,
+            id: row.cottage_id.toString(),
+            name: row.name || `Домик ${row.cottage_id}`,
+            description: 'Уютный домик для отдыха',
+            price: 5000,
+            images: [],
+            capacity: 4,
             status: row.status
         }));
         

@@ -1,7 +1,7 @@
 class Cottage {
   final String id;
   final String name;
-  final String? description;
+  final String description;
   final double price;
   final List<String> images;
   final int capacity;
@@ -9,7 +9,7 @@ class Cottage {
   Cottage({
     required this.id,
     required this.name,
-    this.description,
+    required this.description,
     required this.price,
     required this.images,
     required this.capacity,
@@ -21,8 +21,10 @@ class Cottage {
       name: json['name'] ?? '',
       description: json['description'] ?? '',
       price: (json['price'] as num?)?.toDouble() ?? 0.0,
-      images: List<String>.from(json['images'] ?? []),
-      capacity: json['capacity'] ?? 0,
+      images: json['images'] != null 
+          ? List<String>.from(json['images']) 
+          : <String>[],
+      capacity: json['capacity'] ?? 1,
     );
   }
 

@@ -11,12 +11,38 @@ const pool = new Pool({
 router.get('/', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            `SELECT b.*, c.name as cottage_name 
+            `SELECT 
+                b.booking_id as id,
+                b.cottage_id,
+                b.guest_name,
+                b.phone,
+                b.email,
+                b.check_in_date,
+                b.check_out_date,
+                b.status,
+                b.created_at,
+                c.name as cottage_name 
             FROM lesbaza.bookings b 
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
             ORDER BY b.check_in_date DESC`
         );
-        res.json(rows);
+        
+        // Преобразуем данные для Flutter
+        const bookings = rows.map(row => ({
+            id: row.id?.toString() || '',
+            cottageId: row.cottage_id?.toString() || '',
+            startDate: row.check_in_date,
+            endDate: row.check_out_date,
+            guests: row.guests || 1,
+            userId: row.user_id?.toString() || 'admin',
+            status: row.status || 'booked',
+            guestName: row.guest_name || '',
+            phone: row.phone || '',
+            email: row.email || '',
+            cottageName: row.cottage_name || ''
+        }));
+        
+        res.json(bookings);
     } catch (err) {
         console.error('Error fetching bookings:', err);
         res.status(500).json({ message: 'Error fetching bookings', error: err.message });
@@ -27,103 +53,44 @@ router.get('/', async (req, res) => {
 router.get('/cottage/:cottageId', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            `SELECT b.*, c.name as cottage_name 
+            `SELECT 
+                b.booking_id as id,
+                b.cottage_id,
+                b.guest_name,
+                b.phone,
+                b.email,
+                b.check_in_date,
+                b.check_out_date,
+                b.status,
+                b.created_at,
+                c.name as cottage_name 
             FROM lesbaza.bookings b 
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
             WHERE b.cottage_id = $1 
+            AND b.status != 'cancelled'
             ORDER BY b.check_in_date DESC`,
             [req.params.cottageId]
         );
-        res.json(rows);
+        
+        // Преобразуем данные для Flutter
+        const bookings = rows.map(row => ({
+            id: row.id?.toString() || '',
+            cottageId: row.cottage_id?.toString() || '',
+            startDate: row.check_in_date,
+            endDate: row.check_out_date,
+            guests: row.guests || 1,
+            userId: row.user_id?.toString() || 'admin',
+            status: row.status || 'booked',
+            guestName: row.guest_name || '',
+            phone: row.phone || '',
+            email: row.email || '',
+            cottageName: row.cottage_name || ''
+        }));
+        
+        res.json(bookings);
     } catch (err) {
         console.error('Error fetching bookings by cottage:', err);
         res.status(500).json({ message: 'Error fetching bookings', error: err.message });
-    }
-});
-
-// Get calendar data for a date range
-router.get('/calendar/:cottageId/:startDate/:endDate', async (req, res) => {
-    try {
-        const { cottageId, startDate, endDate } = req.params;
-        
-        // Get bookings for the cottage in the date range
-        const { rows: bookings } = await pool.query(
-            `SELECT b.*, c.name as cottage_name, t.name as tariff_name, t.price as tariff_price
-            FROM lesbaza.bookings b 
-            JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
-            LEFT JOIN lesbaza.tariffs t ON b.tariff_id = t.tariff_id
-            WHERE b.cottage_id = $1 
-            AND (
-                ($2::date BETWEEN check_in_date AND check_out_date) 
-                OR ($3::date BETWEEN check_in_date AND check_out_date)
-                OR (check_in_date BETWEEN $2::date AND $3::date)
-            )
-            ORDER BY b.check_in_date`,
-            [cottageId, startDate, endDate]
-        );
-
-        // Initialize calendar data
-        const calendar = {};
-        
-        // Add all dates to calendar
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const date = d.toISOString().split('T')[0];
-            calendar[date] = {};
-        }
-
-        // Fill calendar with booking data
-        bookings.forEach(booking => {
-            const checkIn = new Date(booking.check_in_date);
-            const checkOut = new Date(booking.check_out_date);
-            const checkInDate = checkIn.toISOString().split('T')[0];
-            const checkOutDate = checkOut.toISOString().split('T')[0];
-
-            // Mark all days of the booking period
-            for (let d = new Date(checkIn); d <= checkOut; d.setDate(d.getDate() + 1)) {
-                const date = d.toISOString().split('T')[0];
-                if (calendar[date]) {
-                    calendar[date][booking.cottage_id] = {
-                        status: booking.status,
-                        bookingId: booking.id,
-                        guestName: booking.guest_name,
-                        phone: booking.phone,
-                        email: booking.email,
-                        checkIn: checkInDate,
-                        checkOut: checkOutDate,
-                        tariff: {
-                            name: booking.tariff_name,
-                            price: booking.tariff_price
-                        },
-                        totalCost: booking.total_cost,
-                        notes: booking.notes,
-                        isCheckIn: date === checkInDate,
-                        isCheckOut: date === checkOutDate,
-                        isPartDay: date === checkInDate || date === checkOutDate
-                    };
-                }
-            }
-
-            // Mark all days in between
-            for (let d = new Date(checkIn); d < checkOut; d.setDate(d.getDate() + 1)) {
-                const date = d.toISOString().split('T')[0];
-                if (calendar[date]) {
-                    calendar[date][booking.cottage_id] = {
-                        status: booking.status,
-                        bookingId: booking.id,
-                        guestName: booking.guest_name,
-                        isPartDay: false
-                    };
-                }
-            }
-        });
-
-        res.json(calendar);
-    } catch (err) {
-        console.error('Error fetching calendar data:', err);
-        res.status(500).json({ message: 'Error fetching calendar data', error: err.message });
     }
 });
 
@@ -139,6 +106,7 @@ router.get('/check-availability', async (req, res) => {
             `SELECT EXISTS (
                 SELECT 1 FROM lesbaza.bookings 
                 WHERE cottage_id = $1 
+                AND status != 'cancelled'
                 AND (
                     ($2::date BETWEEN check_in_date AND check_out_date) 
                     OR ($3::date BETWEEN check_in_date AND check_out_date)
@@ -158,74 +126,14 @@ router.get('/check-availability', async (req, res) => {
 // Create a new booking
 router.post('/', async (req, res) => {
     try {
-        const { checkInDate, checkOutDate, guests, cottageId, guestName, phone, email, notes, tariffId } = req.body;
+        const { startDate, endDate, guests, cottageId, guestName, phone, email, userId } = req.body;
         
-        // Check if the cottage is available
+        // Проверяем доступность домика
         const { rows: availability } = await pool.query(
             `SELECT EXISTS (
                 SELECT 1 FROM lesbaza.bookings 
                 WHERE cottage_id = $1 
-                AND (
-                    ($2::date BETWEEN check_in_date AND check_out_date) 
-                    OR ($3::date BETWEEN check_in_date AND check_out_date)
-                    OR (check_in_date BETWEEN $2::date AND $3::date)
-                )
-            ) as is_booked`,
-            [cottageId, checkInDate, checkOutDate]
-        );
-
-        if (availability[0].is_booked) {
-            return res.status(400).json({ message: 'Cottage is already booked for these dates' });
-        }
-
-        const { rows } = await pool.query(
-            `INSERT INTO lesbaza.bookings 
-            (cottage_id, guest_name, phone, email, check_in_date, check_out_date, 
-             status, created_at, notes, tariff_id)
-            VALUES ($1, $2, $3, $4, $5, $6, 'booked', NOW(), $7, $8)
-            RETURNING *`,
-            [cottageId, guestName, phone, email, checkInDate, checkOutDate, notes, tariffId]
-        );
-        res.status(201).json(rows[0]);
-    } catch (err) {
-        console.error('Error creating booking:', err);
-        res.status(500).json({ message: 'Error creating booking', error: err.message });
-    }
-});
-
-// Cancel a booking
-router.delete('/:id', async (req, res) => {
-    try {
-        const { rowCount } = await pool.query(
-            `UPDATE lesbaza.bookings 
-            SET status = 'cancelled', cancelled_at = NOW()
-            WHERE id = $1`,
-            [req.params.id]
-        );
-        
-        if (rowCount === 0) {
-            return res.status(404).json({ message: 'Booking not found' });
-        }
-        
-        res.json({ message: 'Booking cancelled successfully' });
-    } catch (err) {
-        console.error('Error cancelling booking:', err);
-        res.status(500).json({ message: 'Error cancelling booking', error: err.message });
-    }
-});
-
-module.exports = router;
-
-// Create a new booking
-router.post('/', async (req, res) => {
-    try {
-        const { startDate, endDate, guests, cottageId, guestName, phone, email, notes, tariffId } = req.body;
-        
-        // Check if the cottage is available
-        const { rows: availability } = await pool.query(
-            `SELECT EXISTS (
-                SELECT 1 FROM lesbaza.bookings 
-                WHERE cottage_id = $1 
+                AND status != 'cancelled'
                 AND (
                     ($2::date BETWEEN check_in_date AND check_out_date) 
                     OR ($3::date BETWEEN check_in_date AND check_out_date)
@@ -239,50 +147,34 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ message: 'Cottage is already booked for these dates' });
         }
 
+        // Создаем бронирование
         const { rows } = await pool.query(
             `INSERT INTO lesbaza.bookings 
             (cottage_id, guest_name, phone, email, check_in_date, check_out_date, 
-             status, created_at, notes, tariff_id)
-            VALUES ($1, $2, $3, $4, $5, $6, 'booked', NOW(), $7, $8)
+             status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'booked', NOW())
             RETURNING *`,
-            [cottageId, guestName, phone, email, startDate, endDate, notes, tariffId]
+            [cottageId, guestName || '', phone || '', email || '', startDate, endDate]
         );
-        res.status(201).json(rows[0]);
+        
+        // Возвращаем в формате Flutter
+        const booking = {
+            id: rows[0].id?.toString() || '',
+            cottageId: rows[0].cottage_id?.toString() || '',
+            startDate: rows[0].check_in_date,
+            endDate: rows[0].check_out_date,
+            guests: rows[0].guests || 1,
+            userId: rows[0].user_id || 'admin',
+            status: rows[0].status,
+            guestName: rows[0].guest_name || '',
+            phone: rows[0].phone || '',
+            email: rows[0].email || ''
+        };
+        
+        res.status(201).json(booking);
     } catch (err) {
         console.error('Error creating booking:', err);
         res.status(500).json({ message: 'Error creating booking', error: err.message });
-    }
-});
-
-// Get all bookings
-router.get('/', async (req, res) => {
-    try {
-        const { rows } = await pool.query(
-            `SELECT b.*, c.name as cottage_name 
-            FROM lesbaza.bookings b 
-            JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id
-            ORDER BY b.check_in_date DESC`
-        );
-        res.json(rows);
-    } catch (err) {
-        console.error('Error fetching bookings:', err);
-        res.status(500).json({ message: 'Error fetching bookings', error: err.message });
-    }
-});
-
-// Get bookings by cottage
-router.get('/cottage/:cottageId', async (req, res) => {
-    try {
-        const { rows } = await pool.query(
-            `SELECT * FROM lesbaza.bookings 
-            WHERE cottage_id = $1
-            ORDER BY check_in_date DESC`,
-            [req.params.cottageId]
-        );
-        res.json(rows);
-    } catch (err) {
-        console.error('Error fetching bookings by cottage:', err);
-        res.status(500).json({ message: 'Error fetching bookings', error: err.message });
     }
 });
 
@@ -290,41 +182,45 @@ router.get('/cottage/:cottageId', async (req, res) => {
 router.get('/:id', async (req, res) => {
     try {
         const { rows } = await pool.query(
-            `SELECT b.*, c.name as cottage_name 
+            `SELECT 
+                b.booking_id as id,
+                b.cottage_id,
+                b.guest_name,
+                b.phone,
+                b.email,
+                b.check_in_date,
+                b.check_out_date,
+                b.status,
+                b.created_at,
+                c.name as cottage_name 
             FROM lesbaza.bookings b 
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
-            WHERE b.id = $1`,
+            WHERE b.booking_id = $1`,
             [req.params.id]
         );
+        
         if (rows.length === 0) {
             return res.status(404).json({ message: 'Booking not found' });
         }
-        res.json(rows[0]);
+        
+        // Преобразуем данные для Flutter
+        const booking = {
+            id: rows[0].id?.toString() || '',
+            cottageId: rows[0].cottage_id?.toString() || '',
+            guestName: rows[0].guest_name || '',
+            phone: rows[0].phone || '',
+            email: rows[0].email || '',
+            startDate: rows[0].check_in_date,
+            endDate: rows[0].check_out_date,
+            status: rows[0].status,
+            createdAt: rows[0].created_at,
+            cottageName: rows[0].cottage_name || ''
+        };
+        
+        res.json(booking);
     } catch (err) {
         console.error('Error fetching booking:', err);
         res.status(500).json({ message: 'Error fetching booking', error: err.message });
-    }
-});
-
-// Check out (complete) a booking
-router.put('/:id/check-out', async (req, res) => {
-    try {
-        const { checkOutDate, notes } = req.body;
-        const { rowCount } = await pool.query(
-            `UPDATE lesbaza.bookings 
-            SET status = 'completed', check_out_date = $1, notes = $2
-            WHERE id = $3`,
-            [checkOutDate, notes, req.params.id]
-        );
-        
-        if (rowCount === 0) {
-            return res.status(404).json({ message: 'Booking not found' });
-        }
-        
-        res.json({ message: 'Booking checked out successfully' });
-    } catch (err) {
-        console.error('Error checking out booking:', err);
-        res.status(500).json({ message: 'Error checking out booking', error: err.message });
     }
 });
 
@@ -341,10 +237,64 @@ router.delete('/:id', async (req, res) => {
         if (rowCount === 0) {
             return res.status(404).json({ message: 'Booking not found' });
         }
-        res.json({ message: 'Booking updated successfully' });
+        
+        res.status(204).send();
     } catch (err) {
-        console.error('Error updating booking:', err);
-        res.status(500).json({ message: 'Error updating booking' });
+        console.error('Error cancelling booking:', err);
+        res.status(500).json({ message: 'Error cancelling booking', error: err.message });
+    }
+});
+
+// Update booking (for check-out)
+router.get('/cottage/:cottageId/available-dates', async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT 
+                generate_series(
+                    CURRENT_DATE,
+                    CURRENT_DATE + INTERVAL '1 year',
+                    '1 day'
+                )::date as date
+            EXCEPT
+            SELECT 
+                generate_series(
+                    check_in_date,
+                    check_out_date - INTERVAL '1 day',
+                    '1 day'
+                )::date as date
+            FROM lesbaza.bookings
+            WHERE cottage_id = $1
+            AND status IN ('booked', 'occupied')
+            AND check_in_date >= CURRENT_DATE
+            ORDER BY date`,
+            [req.params.cottageId]
+        );
+        
+        res.json(rows.map(row => row.date.toISOString().split('T')[0]));
+    } catch (err) {
+        console.error('Error fetching available dates:', err);
+        res.status(500).json({ message: 'Error fetching available dates', error: err.message });
+    }
+});
+
+router.put('/:id/check-out', async (req, res) => {
+    try {
+        const { checkOutDate, notes } = req.body;
+        const { rowCount } = await pool.query(
+            `UPDATE lesbaza.bookings 
+            SET check_out_date = $1, notes = $2 
+            WHERE booking_id = $3`,
+            [checkOutDate || new Date(), notes || '', req.params.id]
+        );
+        
+        if (rowCount === 0) {
+            return res.status(404).json({ message: 'Booking not found' });
+        }
+        
+        res.json({ message: 'Booking checked out successfully' });
+    } catch (err) {
+        console.error('Error checking out booking:', err);
+        res.status(500).json({ message: 'Error checking out booking', error: err.message });
     }
 });
 

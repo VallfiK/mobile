@@ -30,10 +30,19 @@ class BookingService {
     }
   }
 
-  Future<Booking> createBooking(Booking booking) async {
+    Future<Booking> createBooking(Booking booking) async {
     final response = await _apiClient.post(
       '/bookings',
-      booking.toJson(),
+      {
+        'startDate': booking.startDate.toIso8601String(),
+        'endDate': booking.endDate.toIso8601String(),
+        'cottageId': booking.cottageId,
+        'guestName': booking.guestName,
+        'phone': booking.phone,
+        'email': booking.email,
+        'guests': booking.guests,
+        'userId': booking.userId,
+      },
     );
     
     if (response.statusCode == 201) {
@@ -52,7 +61,7 @@ class BookingService {
   }
 
   Future<List<DateTime>> getAvailableDates(String cottageId) async {
-    final response = await _apiClient.get('/cottages/$cottageId/available-dates');
+    final response = await _apiClient.get('/bookings/cottage/$cottageId/available-dates');
     
     if (response.statusCode == 200) {
       final List<dynamic> data = jsonDecode(response.body);
