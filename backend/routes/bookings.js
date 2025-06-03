@@ -101,7 +101,7 @@ const checkAvailability = async (cottageId, startDate, endDate) => {
                 AND status NOT IN ('cancelled', 'completed')
                 AND (
                     -- Проверяем пересечение дат
-                    (($2::timestamp AT TIME ZONE 'UTC')::date, ($3::timestamp AT TIME ZONE 'UTC')::date) OVERLAPS 
+                    ($2::date, $3::date) OVERLAPS 
                     ((check_in_date AT TIME ZONE 'UTC')::date, (check_out_date AT TIME ZONE 'UTC')::date)
                 )
             ) as is_booked,
@@ -116,9 +116,9 @@ const checkAvailability = async (cottageId, startDate, endDate) => {
         FROM lesbaza.bookings 
         WHERE cottage_id = $1 
         AND status NOT IN ('cancelled', 'completed')
-        AND (check_out_date AT TIME ZONE 'UTC')::date >= ($2::timestamp AT TIME ZONE 'UTC')::date
-        AND (check_in_date AT TIME ZONE 'UTC')::date <= ($3::timestamp AT TIME ZONE 'UTC')::date`,
-        [cottageId, utcStartDate.toISOString(), utcEndDate.toISOString()]
+        AND DATE($2::timestamp) >= DATE(check_in_date AT TIME ZONE 'UTC')
+        AND DATE($3::timestamp) < DATE(check_out_date AT TIME ZONE 'UTC')`,
+        [cottageId, startDate, endDate]
     );
 
     const result = {
@@ -191,8 +191,8 @@ router.get('/cottage/:cottageId', async (req, res) => {
                 b.guest_name,
                 b.phone,
                 b.email,
-                b.check_in_date,
-                b.check_out_date,
+                b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
+                b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
                 b.status,
                 b.created_at,
                 b.guests,
@@ -208,12 +208,12 @@ router.get('/cottage/:cottageId', async (req, res) => {
             [req.params.cottageId]
         );
         
-        // Преобразуем данные для Flutter
+        // Преобразуем даты в московское время и форматируем их
         const bookings = rows.map(row => ({
             id: row.id?.toString() || '',
             cottageId: row.cottage_id?.toString() || '',
-            startDate: row.check_in_date,
-            endDate: row.check_out_date,
+            startDate: row.check_in_date.toISOString().split('T')[0],
+            endDate: row.check_out_date.toISOString().split('T')[0],
             guests: row.guests || 1,
             status: row.status || 'pending',
             guestName: row.guest_name || '',
@@ -388,20 +388,21 @@ router.post('/', async (req, res) => {
         // Parse and validate dates
         let parsedStartDate, parsedEndDate;
         try {
-            parsedStartDate = new Date(startDate);
-            parsedEndDate = new Date(endDate);
+            // Convert dates to Moscow time
+            parsedStartDate = new Date(startDate + 'T14:00:00.000+03:00');
+            parsedEndDate = new Date(endDate + 'T12:00:00.000+03:00');
             
             if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
                 throw new Error('Invalid date format');
             }
 
             console.log('\nParsed dates:');
-            console.log('Start date:', parsedStartDate.toISOString());
-            console.log('End date:', parsedEndDate.toISOString());
+            console.log('Start date (Moscow):', parsedStartDate.toISOString());
+            console.log('End date (Moscow):', parsedEndDate.toISOString());
         } catch (error) {
             console.error('Date parsing error:', error);
             return res.status(400).json({
-                message: 'Неверный формат даты. Пожалуйста, используйте формат ISO 8601 (например, 2025-06-03T14:00:00.000)'
+                message: 'Неверный формат даты. Пожалуйста, используйте формат ISO 8601 (например, 2025-06-03)'
             });
         }
 
@@ -447,7 +448,20 @@ router.post('/', async (req, res) => {
             `INSERT INTO lesbaza.bookings 
             (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, created_at) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP) 
-            RETURNING *`,
+            RETURNING 
+                booking_id as id,
+                cottage_id,
+                guest_name,
+                phone,
+                email,
+                check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
+                check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
+                status,
+                guests,
+                created_at,
+                notes,
+                total_cost,
+                tariff_id`,
             params
         );
 
@@ -457,8 +471,24 @@ router.post('/', async (req, res) => {
         bookingsCache.del(`cottage_${cottageId}`);
         bookingsCache.del(`cottage_${cottageId}_date_${parsedStartDate.toISOString()}`);
 
-        console.log('\nBooking created successfully:', rows[0]);
-        res.status(201).json(rows[0]);
+        // Преобразуем даты в московское время и форматируем их
+        const booking = {
+            id: rows[0].id?.toString() || '',
+            cottageId: rows[0].cottage_id?.toString() || '',
+            startDate: rows[0].check_in_date.toISOString().split('T')[0],
+            endDate: rows[0].check_out_date.toISOString().split('T')[0],
+            guests: rows[0].guests || 1,
+            status: rows[0].status || 'booked',
+            guestName: rows[0].guest_name || '',
+            phone: rows[0].phone || '',
+            email: rows[0].email || '',
+            notes: rows[0].notes || '',
+            totalCost: rows[0].total_cost || 0,
+            tariffId: rows[0].tariff_id?.toString() || ''
+        };
+
+        console.log('\nBooking created successfully:', booking);
+        res.status(201).json(booking);
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Error creating booking:', err);
@@ -633,8 +663,8 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
             WHERE b.cottage_id = $1 
             AND b.status != 'cancelled'
-            AND DATE($2 AT TIME ZONE 'Europe/Moscow') >= (b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')::date
-            AND DATE($2 AT TIME ZONE 'Europe/Moscow') < (b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')::date
+            AND DATE($2::timestamp AT TIME ZONE 'Europe/Moscow') >= DATE(b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')
+            AND DATE($2::timestamp AT TIME ZONE 'Europe/Moscow') < DATE(b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')
             ORDER BY b.check_in_date DESC`,
             [req.params.cottageId, req.params.date]
         );
@@ -648,22 +678,30 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             console.log('  status:', row.status);
         });
         
-        // Преобразуем данные для Flutter
-        const bookings = rows.map(row => ({
-            id: row.id?.toString() || '',
-            cottageId: row.cottage_id?.toString() || '',
-            startDate: row.check_in_date.toISOString().split('T')[0],
-            endDate: row.check_out_date.toISOString().split('T')[0],
-            guests: row.guests || 1,
-            status: row.status || 'booked',
-            guestName: row.guest_name || '',
-            phone: row.phone || '',
-            email: row.email || '',
-            cottageName: row.cottage_name || ''
-        }));
+        // Преобразуем даты в московское время и форматируем их
+        const bookings = rows.map(row => {
+            const checkInDate = new Date(row.check_in_date);
+            const checkOutDate = new Date(row.check_out_date);
+            
+            // Сдвигаем даты на 1 день вперед
+            checkInDate.setDate(checkInDate.getDate() + 1);
+            checkOutDate.setDate(checkOutDate.getDate() + 1);
+            
+            return {
+                id: row.id?.toString() || '',
+                cottageId: row.cottage_id?.toString() || '',
+                startDate: checkInDate.toISOString().split('T')[0],
+                endDate: checkOutDate.toISOString().split('T')[0],
+                guests: row.guests || 1,
+                status: row.status || 'booked',
+                guestName: row.guest_name || '',
+                phone: row.phone || '',
+                email: row.email || '',
+                cottageName: row.cottage_name || ''
+            };
+        });
         
-        console.log('\n=== Sending to Client ===');
-        console.log('Sending bookings:', bookings.length);
+        console.log('\n=== Final Response ===');
         bookings.forEach(booking => {
             console.log(`Booking ${booking.id}:`);
             console.log('  startDate:', booking.startDate);

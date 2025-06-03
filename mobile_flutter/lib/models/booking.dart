@@ -33,11 +33,15 @@ class Booking {
     // Пытаемся получить ID из разных возможных полей
     final id = (json['id'] ?? json['booking_id'])?.toString() ?? '';
     
+    // Парсим даты, сохраняя их в московском времени
+    final startDateStr = json['check_in_date'] ?? json['startDate'] ?? DateTime.now().toIso8601String();
+    final endDateStr = json['check_out_date'] ?? json['endDate'] ?? DateTime.now().toIso8601String();
+    
     return Booking(
       id: id,
       cottageId: json['cottage_id']?.toString() ?? '',
-      startDate: DateTime.parse(json['check_in_date'] ?? DateTime.now().toIso8601String()).toLocal(),
-      endDate: DateTime.parse(json['check_out_date'] ?? DateTime.now().toIso8601String()).toLocal(),
+      startDate: DateTime.parse(startDateStr),
+      endDate: DateTime.parse(endDateStr),
       guests: json['guests'] ?? 1,
       status: json['status'] ?? 'booked',
       guestName: json['guest_name']?.toString() ?? '',
