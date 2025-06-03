@@ -36,33 +36,52 @@ class _BookingFormScreenState extends State<BookingFormScreen> {
   }
 
   Future<void> _submitBooking() async {
-    if (_formKey.currentState!.validate()) {
+    if (_formKey.currentState!.validate() && _checkOutDate != null) {
       setState(() => _isLoading = true);
       try {
+        final numericCottageId = int.tryParse(widget.cottageId);
+        if (numericCottageId == null) {
+          throw Exception('Некорректный ID домика');
+        }
+
         final booking = Booking(
-          id: '', // будет сгенерирован на сервере
-          cottageId: widget.cottageId,
+          id: '',
+          cottageId: numericCottageId.toString(),
           startDate: _checkInDate,
           endDate: _checkOutDate!,
           guests: 1,
-          userId: 'current_user_id', // нужно будет получить из аутентификации
+          status: 'booked',
+          guestName: _name,
+          phone: _phone,
+          email: _email,
+          tariffId: '1', // Используем стандартный тариф по умолчанию
         );
 
         await Provider.of<BookingService>(context, listen: false)
             .createBooking(booking);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Бронирование успешно создано!')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Бронирование успешно создано!')),
+          );
 
-        Navigator.pop(context);
+          Navigator.pop(context);
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ошибка: $e')),
+          );
+        }
       } finally {
-        setState(() => _isLoading = false);
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
       }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пожалуйста, выберите дату выезда')),
+      );
     }
   }
 

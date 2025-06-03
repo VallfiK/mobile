@@ -1,22 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';  // Добавляем импорт для TimeoutException
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/api_config.dart';
 
 class ApiClient {
-  // Для iOS симулятора и физических устройств используйте IP вашего компьютера
-  static String get baseUrl {
-    if (Platform.isAndroid) {
-      // Для Android устройства
-      return 'http://178.234.13.110:8080/api';
-    } else if (Platform.isIOS) {
-      // Для iOS симулятора используйте IP вашего компьютера
-      return 'http://178.234.13.110:8080/api';
-    } else {
-      // Для веб и других платформ
-      return 'http://178.234.13.110:8080/api';
-    }
-  }
+  final String baseUrl = ApiConfig.baseUrl;
+
+  // Увеличиваем таймауты для медленных соединений
+  static const timeout = Duration(seconds: 30);
+  
+  final http.Client _client;
+  
+  ApiClient({http.Client? client}) : _client = client ?? http.Client();
 
   @override
   void dispose() {
@@ -25,20 +22,51 @@ class ApiClient {
 
   Future<bool> testConnection() async {
     try {
-      final response = await _client.get(Uri.parse('${baseUrl}/apiping'));
-      print('Connection test response: ${response.statusCode}');
+      print('Testing API connection...');
+      print('Base URL: $baseUrl');
+      
+      final uri = Uri.parse('$baseUrl/api/ping');
+      print('Request URI: $uri');
+      
+      final response = await _client.get(uri).timeout(
+        timeout,
+        onTimeout: () {
+          print('Connection timeout');
+          throw TimeoutException('Connection timeout after ${timeout.inSeconds} seconds');
+        },
+      );
+      
+      print('Connection test response code: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
       print('Response body: ${response.body}');
-      return response.statusCode == 200;
-    } catch (e) {
+      
+      if (response.statusCode == 200) {
+        try {
+          final data = json.decode(response.body);
+          print('Decoded response: $data');
+          return true;
+        } catch (e) {
+          print('Failed to decode response: $e');
+          return false;
+        }
+      } else {
+        print('Unexpected status code: ${response.statusCode}');
+        return false;
+      }
+    } on SocketException catch (e) {
+      print('Socket error: ${e.message}');
+      print('Address: ${e.address}');
+      print('Port: ${e.port}');
+      return false;
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      return false;
+    } catch (e, stackTrace) {
       print('Connection test failed: $e');
+      print('Stack trace: $stackTrace');
       return false;
     }
   }
-
-  final http.Client _client;
-  
-  ApiClient({http.Client? client}) : _client = client ?? http.Client();
-
 
   Future<String?> getAuthToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -51,7 +79,7 @@ class ApiClient {
     Map<String, dynamic>? body,
     Map<String, String>? headers,
   }) async {
-    final url = Uri.parse('$baseUrl$path');
+    final url = Uri.parse('$baseUrl/api$path');
     final authHeaders = await _getAuthHeaders();
     
     final requestHeaders = {
@@ -83,74 +111,121 @@ class ApiClient {
   }
 
   Future<http.Response> get(String path) async {
-    final url = Uri.parse('$baseUrl$path');
-    print('GET $url');
-    print('Full URL: ${url.toString()}');
+    final url = Uri.parse('$baseUrl/api$path');
+    print('GET Request: $url');
+    
     try {
-      print('Sending request...');
-      final response = await _client.get(url);
-      print('Response received');
-      print('Status code: ${response.statusCode}');
-      print('Headers: ${response.headers}');
-      print('Body: ${response.body}');
+      final response = await _client.get(url).timeout(
+        timeout,
+        onTimeout: () {
+          throw TimeoutException('Request timeout after ${timeout.inSeconds} seconds');
+        },
+      );
+      
+      print('Response status: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
+      print('Response body: ${response.body}');
+      
       return response;
+    } on SocketException catch (e) {
+      print('Network error: ${e.message}');
+      rethrow;
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      rethrow;
     } catch (e) {
-      print('Error occurred: $e');
-      if (e is SocketException) {
-        print('Socket error: ${e.message}');
-      }
+      print('Request failed: $e');
       rethrow;
     }
   }
 
   Future<http.Response> post(String path, Map<String, dynamic> body) async {
-    final url = Uri.parse('$baseUrl$path');
-    print('POST $url');
-    print('Body: ${jsonEncode(body)}');
+    final url = Uri.parse('$baseUrl/api$path');
+    print('POST Request: $url');
+    print('Request body: ${jsonEncode(body)}');
+    
     try {
       final response = await _client.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
+      ).timeout(
+        timeout,
+        onTimeout: () {
+          throw TimeoutException('Request timeout after ${timeout.inSeconds} seconds');
+        },
       );
+      
       print('Response status: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
       print('Response body: ${response.body}');
+      
       return response;
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      rethrow;
     } catch (e) {
-      print('Error: $e');
+      print('Request failed: $e');
       rethrow;
     }
   }
 
   Future<http.Response> put(String path, Map<String, dynamic> body) async {
-    final url = Uri.parse('$baseUrl$path');
-    print('PUT $url');
-    print('Body: ${jsonEncode(body)}');
+    final url = Uri.parse('$baseUrl/api$path');
+    print('PUT Request: $url');
+    print('Request body: ${jsonEncode(body)}');
+    
     try {
       final response = await _client.put(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
+      ).timeout(
+        timeout,
+        onTimeout: () {
+          throw TimeoutException('Request timeout after ${timeout.inSeconds} seconds');
+        },
       );
+      
       print('Response status: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
       print('Response body: ${response.body}');
+      
       return response;
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      rethrow;
     } catch (e) {
-      print('Error: $e');
+      print('Request failed: $e');
       rethrow;
     }
   }
 
   Future<http.Response> delete(String path) async {
-    final url = Uri.parse('$baseUrl$path');
-    print('DELETE $url');
+    final url = Uri.parse('$baseUrl/api$path');
+    print('DELETE Request: $url');
+    
     try {
-      final response = await _client.delete(url);
+      final response = await _client.delete(
+        url,
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(
+        timeout,
+        onTimeout: () {
+          throw TimeoutException('Request timeout after ${timeout.inSeconds} seconds');
+        },
+      );
+      
       print('Response status: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
       print('Response body: ${response.body}');
+      
       return response;
+    } on TimeoutException catch (e) {
+      print('Timeout error: $e');
+      rethrow;
     } catch (e) {
-      print('Error: $e');
+      print('Request failed: $e');
       rethrow;
     }
   }

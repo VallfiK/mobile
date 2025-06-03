@@ -1,5 +1,5 @@
 Запуск сборки... 
-Дата: 02.06.2025 11:58:39,60 
+Дата: 02.06.2025 20:42:10,39 
  
-Running Gradle task 'assembleRelease'...                           31,8s
-√ Built build\app\outputs\flutter-apk\app-release.apk (8.6MB)
+Running Gradle task 'assembleRelease'...                           85,6s
+√ Built build\app\outputs\flutter-apk\app-release.apk (8.8MB)

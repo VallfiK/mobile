@@ -5,8 +5,8 @@ import '../models/booking.dart';
 import '../services/cottage_service.dart';
 import '../services/booking_service.dart';
 import '../widgets/calendar_view.dart';
-import '../widgets/booking_date_picker.dart';
 import '../widgets/booking_filters.dart';
+import '../widgets/booking_form_dialog.dart';
 
 class CottageDetailScreen extends StatefulWidget {
   final String cottageId;
@@ -20,12 +20,6 @@ class CottageDetailScreen extends StatefulWidget {
 class _CottageDetailScreenState extends State<CottageDetailScreen> {
   late Future<Cottage> _cottageFuture;
   late Future<List<Booking>> _bookingsFuture;
-  DateTime _checkInDate = DateTime.now();
-  DateTime? _checkOutDate;
-  int _guests = 1;
-  String _name = '';
-  String _phone = '';
-  String _email = '';
   bool _isLoading = false;
   List<Booking> _filteredBookings = [];
 
@@ -38,44 +32,20 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
         .getBookingsByCottage(widget.cottageId);
   }
 
-  Future<void> _createBooking() async {
-    if (_checkOutDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Выберите дату выезда')),
-      );
-      return;
-    }
-
+  Future<void> _cancelBooking(String bookingId) async {
     setState(() => _isLoading = true);
     try {
-      final booking = Booking(
-        id: '', // будет сгенерирован на сервере
-        cottageId: widget.cottageId,
-        startDate: _checkInDate,
-        endDate: _checkOutDate!,
-        userId: 'admin', // администратор
-        guestName: _name.isNotEmpty ? _name : 'Гость',
-        phone: _phone,
-        email: _email,
-        guests: _guests,
-      );
-
-      await Provider.of<BookingService>(context, listen: false)
-          .createBooking(booking);
+      final bookingService = Provider.of<BookingService>(context, listen: false);
+      await bookingService.cancelBooking(bookingId);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Бронирование успешно создано!')),
+        const SnackBar(content: Text('Бронирование успешно отменено!')),
       );
 
       setState(() {
-        _checkInDate = DateTime.now();
-        _checkOutDate = null;
-        _guests = 1;
-        _name = '';
-        _phone = '';
-        _email = '';
         _bookingsFuture = Provider.of<BookingService>(context, listen: false)
             .getBookingsByCottage(widget.cottageId);
+        _filteredBookings = [];
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -86,19 +56,20 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
     }
   }
 
-  Future<void> _cancelBooking(String bookingId) async {
+  Future<void> _createBooking(Booking booking) async {
     setState(() => _isLoading = true);
     try {
       await Provider.of<BookingService>(context, listen: false)
-          .cancelBooking(bookingId);
+          .createBooking(booking);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Бронирование успешно отменено!')),
+        const SnackBar(content: Text('Бронирование успешно создано!')),
       );
 
       setState(() {
         _bookingsFuture = Provider.of<BookingService>(context, listen: false)
             .getBookingsByCottage(widget.cottageId);
+        _filteredBookings = [];
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -113,6 +84,28 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
     setState(() {
       _filteredBookings = filteredBookings;
     });
+  }
+
+  void _showBookingDialog(BuildContext context, Cottage cottage, DateTime selectedDate) {
+    final bookingService = Provider.of<BookingService>(context, listen: false);
+    showDialog(
+      context: context,
+      builder: (dialogContext) => BookingFormDialog(
+        cottage: cottage,
+        selectedDate: selectedDate,
+        onSubmit: (booking) async {
+          await _createBooking(booking);
+          // Обновляем список бронирований
+          if (mounted) {
+            setState(() {
+              _bookingsFuture = bookingService.getBookingsByCottage(widget.cottageId);
+              _filteredBookings = [];
+            });
+          }
+        },
+        bookingService: bookingService,
+      ),
+    );
   }
 
   @override
@@ -155,58 +148,120 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
               }
 
               return SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildImageGallery(cottage.images),
-                    Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            cottage.name,
-                            style: Theme.of(context).textTheme.headlineMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Цена: ${cottage.price} ₽ в сутки',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Вместимость: ${cottage.capacity} человек',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            cottage.description.isNotEmpty 
-                                ? cottage.description 
-                                : 'Описание отсутствует',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const SizedBox(height: 24),
-                          BookingFilters(
-                            bookings: bookings,
-                            onFilterApplied: _applyFilters,
-                          ),
-                          const SizedBox(height: 24),
-                          CalendarView(
-                            cottage: cottage,
-                            bookings: _filteredBookings,
-                            onCancelBooking: _cancelBooking,
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'Создать бронирование',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildBookingForm(cottage),
-                        ],
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).padding.bottom + 32.0
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildImageGallery(cottage.images),
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              cottage.name,
+                              style: Theme.of(context).textTheme.headlineMedium,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Цена: ${cottage.price} ₽ в сутки',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Вместимость: ${cottage.capacity} человек',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              cottage.description.isNotEmpty 
+                                  ? cottage.description 
+                                  : 'Описание отсутствует',
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'Календарь бронирований',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 16),
+                            CalendarView(
+                              cottage: cottage,
+                              bookings: _filteredBookings,
+                              onCancelBooking: _cancelBooking,
+                              onDateSelected: (selectedDate) async {
+                                try {
+                                  final normalizedDate = DateTime(
+                                    selectedDate.year,
+                                    selectedDate.month,
+                                    selectedDate.day,
+                                  );
+                                  
+                                  final newBookings = await Provider.of<BookingService>(context, listen: false)
+                                      .getBookingsByDate(widget.cottageId, normalizedDate);
+                                  
+                                  if (mounted) {
+                                    setState(() {
+                                      // Создаем множество существующих ID бронирований
+                                      final existingIds = Set<String>.from(
+                                        _filteredBookings.map((b) => b.id)
+                                      );
+                                      
+                                      // Добавляем только новые бронирования
+                                      for (var booking in newBookings) {
+                                        if (!existingIds.contains(booking.id)) {
+                                          _filteredBookings.add(booking);
+                                        }
+                                      }
+                                    });
+                                  }
+                                  
+                                  // Проверяем, есть ли бронирование на выбранную дату во ВСЕХ бронированиях
+                                  final hasBookings = _filteredBookings.any((booking) {
+                                    if (booking.startDate == null || booking.endDate == null) return false;
+                                    
+                                    final start = DateTime(
+                                      booking.startDate.year,
+                                      booking.startDate.month,
+                                      booking.startDate.day,
+                                    );
+                                    final end = DateTime(
+                                      booking.endDate.year,
+                                      booking.endDate.month,
+                                      booking.endDate.day,
+                                    );
+                                    
+                                    // Проверяем, входит ли выбранная дата в диапазон бронирования
+                                    return !normalizedDate.isBefore(start) && 
+                                           !normalizedDate.isAfter(end);
+                                  });
+                                  
+                                  print('Selected date: $normalizedDate');
+                                  print('Has bookings: $hasBookings');
+                                  print('Total bookings: ${_filteredBookings.length}');
+                                  
+                                  // Если нет бронирований, показываем форму бронирования
+                                  if (!hasBookings) {
+                                    _showBookingDialog(context, cottage, normalizedDate);
+                                  }
+                                  
+                                  return _filteredBookings;
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Ошибка загрузки бронирований: $e')),
+                                  );
+                                  return _filteredBookings;
+                                }
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               );
             },
@@ -216,124 +271,13 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
     );
   }
 
-  Widget _buildBookingForm(Cottage cottage) {
-    return Column(
-      children: [
-        BookingDatePicker(
-          initialDate: _checkInDate,
-          onDateSelected: (date) {
-            setState(() {
-              _checkInDate = date;
-              if (_checkOutDate != null &&
-                  _checkOutDate!.isBefore(date)) {
-                _checkOutDate = date.add(const Duration(days: 1));
-              }
-            });
-          },
-          availableDates: [], // TODO: Получить доступные даты с сервера
-        ),
-        const SizedBox(height: 16),
-        BookingDatePicker(
-          initialDate: _checkOutDate ??
-              _checkInDate.add(const Duration(days: 1)),
-          onDateSelected: (date) {
-            setState(() => _checkOutDate = date);
-          },
-          availableDates: [], // TODO: Получить доступные даты с сервера
-        ),
-        const SizedBox(height: 16),
-        TextFormField(
-          decoration: const InputDecoration(
-            labelText: 'Имя гостя',
-            prefixIcon: Icon(Icons.person),
-          ),
-          initialValue: _name,
-          onChanged: (value) => _name = value,
-        ),
-        const SizedBox(height: 16),
-        TextFormField(
-          decoration: const InputDecoration(
-            labelText: 'Телефон',
-            prefixIcon: Icon(Icons.phone),
-          ),
-          initialValue: _phone,
-          keyboardType: TextInputType.phone,
-          onChanged: (value) => _phone = value,
-        ),
-        const SizedBox(height: 16),
-        TextFormField(
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            prefixIcon: Icon(Icons.email),
-          ),
-          initialValue: _email,
-          keyboardType: TextInputType.emailAddress,
-          onChanged: (value) => _email = value,
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: TextFormField(
-                decoration: const InputDecoration(
-                  labelText: 'Количество гостей',
-                  prefixIcon: Icon(Icons.people),
-                ),
-                initialValue: _guests.toString(),
-                keyboardType: TextInputType.number,
-                onChanged: (value) {
-                  final guests = int.tryParse(value);
-                  if (guests != null && guests > 0) {
-                    setState(() => _guests = guests);
-                  }
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Text(
-              'Максимум ${cottage.capacity} гостей',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Text(
-          'Итоговая стоимость: ${_calculateTotalPrice(cottage)} ₽',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isLoading ? null : _createBooking,
-            child: _isLoading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
-                  )
-                : const Text('Забронировать'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  int _calculateTotalPrice(Cottage cottage) {
-    if (_checkOutDate == null) return 0;
-    final nights = _checkOutDate!.difference(_checkInDate).inDays;
-    return cottage.price.toInt() * nights;
-  }
-
   Widget _buildImageGallery(List<String> images) {
     if (images.isEmpty) {
       return Container(
         height: 200,
         color: Colors.grey[300],
         child: const Center(
-          child: Icon(Icons.house, size: 64, color: Colors.grey),
+          child: Icon(Icons.image_not_supported, size: 64),
         ),
       );
     }
@@ -350,7 +294,7 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
               return Container(
                 color: Colors.grey[300],
                 child: const Center(
-                  child: Icon(Icons.error, size: 64, color: Colors.grey),
+                  child: Icon(Icons.error_outline, size: 64),
                 ),
               );
             },

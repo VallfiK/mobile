@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'screens/home_screen.dart';
+import 'screens/cottage_list_screen.dart';
+import 'screens/management_screen.dart';
 import 'services/api_client.dart';
 import 'services/cottage_service.dart';
 import 'services/booking_service.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'config/api_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru_RU', null);
   
   // Настройка HTTP-клиента для работы с локальным сервером
   final client = http.Client();
@@ -43,12 +48,12 @@ void main() async {
         ),
       ],
       child: MaterialApp(
-        title: 'База Отдыха',
+        title: 'Управление базой отдыха',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
           useMaterial3: true,
         ),
-        home: const HomeScreen(),
+        home: const MainScreen(),
       ),
     ),
   );
@@ -62,31 +67,42 @@ class MyHttpOverrides extends HttpOverrides {
   }
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  int _selectedIndex = 0;
+
+  final List<Widget> _screens = [
+    const CottageListScreen(),
+    const ManagementScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'База Отдыха',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
-      home: MultiProvider(
-        providers: [
-          Provider<ApiClient>(
-            create: (_) => ApiClient(),
-            dispose: (_, client) => client.dispose(),
+    return Scaffold(
+      body: _screens[_selectedIndex],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home),
+            label: 'Домики',
           ),
-          ProxyProvider<ApiClient, CottageService>(
-            update: (_, apiClient, __) => CottageService(apiClient),
-          ),
-          ProxyProvider<ApiClient, BookingService>(
-            update: (_, apiClient, __) => BookingService(apiClient),
+          NavigationDestination(
+            icon: Icon(Icons.settings),
+            label: 'Управление',
           ),
         ],
-        child: const HomeScreen(),
       ),
     );
   }

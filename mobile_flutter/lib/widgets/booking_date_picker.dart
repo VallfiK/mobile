@@ -3,13 +3,15 @@ import 'package:intl/intl.dart';
 
 class BookingDatePicker extends StatefulWidget {
   final DateTime initialDate;
-  final Function(DateTime) onDateSelected;
+  final DateTime? endDate;
+  final Function(DateTime, DateTime?) onDatesSelected;
   final List<DateTime> availableDates;
 
   const BookingDatePicker({
     super.key,
     required this.initialDate,
-    required this.onDateSelected,
+    this.endDate,
+    required this.onDatesSelected,
     required this.availableDates,
   });
 
@@ -18,12 +20,14 @@ class BookingDatePicker extends StatefulWidget {
 }
 
 class _BookingDatePickerState extends State<BookingDatePicker> {
-  late DateTime _selectedDate;
+  late DateTime _checkInDate;
+  DateTime? _checkOutDate;
 
   @override
   void initState() {
     super.initState();
-    _selectedDate = widget.initialDate;
+    _checkInDate = widget.initialDate;
+    _checkOutDate = widget.endDate;
   }
 
   bool _isDateAvailable(DateTime date) {
@@ -39,7 +43,7 @@ class _BookingDatePickerState extends State<BookingDatePicker> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Выберите дату заселения',
+          'Период бронирования',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
@@ -49,35 +53,71 @@ class _BookingDatePickerState extends State<BookingDatePicker> {
             border: Border.all(color: Theme.of(context).colorScheme.outline),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Row(
+          child: Column(
             children: [
-              Expanded(
-                child: Text(
-                  DateFormat('dd MMMM yyyy').format(_selectedDate),
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.calendar_today),
-                onPressed: () async {
-                  final DateTime? picked = await showDatePicker(
-                    context: context,
-                    initialDate: _selectedDate,
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                    selectableDayPredicate: (DateTime date) {
-                      return _isDateAvailable(date);
-                    },
-                  );
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Дата заезда: ${DateFormat('dd MMMM yyyy').format(_checkInDate)}',
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.calendar_today),
+                    onPressed: () async {
+                      final DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: _checkInDate,
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                        selectableDayPredicate: (DateTime date) {
+                          return _isDateAvailable(date);
+                        },
+                      );
 
-                  if (picked != null && picked != _selectedDate) {
-                    setState(() {
-                      _selectedDate = picked;
-                      widget.onDateSelected(picked);
-                    });
-                  }
-                },
+                      if (picked != null && picked != _checkInDate) {
+                        setState(() {
+                          _checkInDate = picked;
+                          widget.onDatesSelected(picked, _checkOutDate);
+                        });
+                      }
+                    },
+                  ),
+                ],
               ),
+              if (_checkOutDate != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Дата выезда: ${DateFormat('dd MMMM yyyy').format(_checkOutDate!)}',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.calendar_today),
+                      onPressed: () async {
+                        final DateTime? picked = await showDatePicker(
+                          context: context,
+                          initialDate: _checkOutDate!,
+                          firstDate: _checkInDate.add(const Duration(days: 1)),
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                          selectableDayPredicate: (DateTime date) {
+                            return _isDateAvailable(date);
+                          },
+                        );
+
+                        if (picked != null && picked != _checkOutDate) {
+                          setState(() {
+                            _checkOutDate = picked;
+                            widget.onDatesSelected(_checkInDate, picked);
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

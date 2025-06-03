@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = 8080; // Фиксированный порт
+const PORT = 8080; // Changed back to port 8080
 
 // Middleware
 app.use(cors({
@@ -19,10 +19,20 @@ app.use((req, res, next) => {
     next();
 });
 
-// Роуты
-app.get('/api/apiping', (req, res) => {
-    console.log('Ping request received');
+// Ping routes
+app.get('/api/ping', (req, res) => {
+    console.log('Ping request received at /api/ping');
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/apiping', (req, res) => {
+    console.log('Ping request received at /api/apiping');
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Health check route
+app.get('/health', (req, res) => {
+    res.json({ status: 'healthy', uptime: process.uptime() });
 });
 
 // Подключаем роутеры
@@ -45,25 +55,70 @@ app.get('/api/calendar/:cottageId/:startDate/:endDate', async (req, res) => {
 
 // Тестовый роут
 app.get('/', (req, res) => {
-    res.json({ message: 'API is running' });
+    res.json({ 
+        message: 'API is running',
+        endpoints: {
+            ping: '/api/ping',
+            apiping: '/api/apiping',
+            health: '/health',
+            cottages: '/api/cottages',
+            bookings: '/api/bookings',
+            calendar: '/api/calendar/:cottageId/:startDate/:endDate'
+        }
+    });
 });
+
+// Обработка OPTIONS запросов для CORS
+app.options('*', cors());
 
 // Обработка 404
 app.use((req, res) => {
-    res.status(404).json({ message: 'Route not found' });
+    console.log(`404 - Route not found: ${req.method} ${req.url}`);
+    res.status(404).json({ 
+        message: 'Route not found',
+        requestedUrl: req.url,
+        method: req.method,
+        availableEndpoints: {
+            ping: '/api/ping',
+            apiping: '/api/apiping',
+            health: '/health',
+            cottages: '/api/cottages',
+            bookings: '/api/bookings',
+            calendar: '/api/calendar/:cottageId/:startDate/:endDate'
+        }
+    });
 });
 
 // Обработчик ошибок
 app.use((err, req, res, next) => {
     console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+        error: 'Internal server error',
+        message: err.message,
+        path: req.url
+    });
 });
 
 // Запуск сервера с обработкой ошибок порта
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
     console.log(`API endpoints available at http://0.0.0.0:${PORT}/api`);
+    console.log('Available endpoints:');
+    console.log('- GET /api/ping');
+    console.log('- GET /api/apiping');
+    console.log('- GET /health');
+    console.log('- GET /api/cottages');
+    console.log('- GET /api/bookings');
     console.log('Public IP: 178.234.13.110');
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
 });
 
 server.on('error', error => {
