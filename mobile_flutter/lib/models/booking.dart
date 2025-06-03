@@ -36,8 +36,8 @@ class Booking {
     return Booking(
       id: id,
       cottageId: json['cottage_id']?.toString() ?? '',
-      startDate: DateTime.parse(json['check_in_date'] ?? DateTime.now().toIso8601String()),
-      endDate: DateTime.parse(json['check_out_date'] ?? DateTime.now().toIso8601String()),
+      startDate: DateTime.parse(json['check_in_date'] ?? DateTime.now().toIso8601String()).toLocal(),
+      endDate: DateTime.parse(json['check_out_date'] ?? DateTime.now().toIso8601String()).toLocal(),
       guests: json['guests'] ?? 1,
       status: json['status'] ?? 'booked',
       guestName: json['guest_name']?.toString() ?? '',

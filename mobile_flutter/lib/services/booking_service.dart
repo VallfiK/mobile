@@ -51,8 +51,9 @@ class BookingService {
 
   Future<List<Booking>> getBookingsByDate(String cottageId, DateTime date) async {
     try {
-      // Send the full datetime to the server for proper timezone handling
-      final formattedDate = date.toIso8601String();
+      // Преобразуем дату в UTC для отправки на сервер
+      final utcDate = date.toUtc();
+      final formattedDate = utcDate.toIso8601String().split('T')[0];
       
       final response = await _apiClient.get('/bookings/cottage/$cottageId/date/$formattedDate');
       

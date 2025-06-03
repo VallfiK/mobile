@@ -83,6 +83,16 @@ const checkAvailability = async (cottageId, startDate, endDate) => {
         return cachedResult;
     }
 
+    // Convert dates to UTC for database comparison
+    const utcStartDate = new Date(startDate);
+    const utcEndDate = new Date(endDate);
+    
+    console.log('Checking availability for dates:');
+    console.log('  Start date:', startDate);
+    console.log('  End date:', endDate);
+    console.log('  UTC start date:', utcStartDate.toISOString());
+    console.log('  UTC end date:', utcEndDate.toISOString());
+    
     const { rows } = await pool.query(
         `SELECT 
             EXISTS (
@@ -91,8 +101,8 @@ const checkAvailability = async (cottageId, startDate, endDate) => {
                 AND status NOT IN ('cancelled', 'completed')
                 AND (
                     -- Проверяем пересечение дат
-                    ($2::timestamp, $3::timestamp) OVERLAPS 
-                    (check_in_date, check_out_date)
+                    (($2::timestamp AT TIME ZONE 'UTC')::date, ($3::timestamp AT TIME ZONE 'UTC')::date) OVERLAPS 
+                    ((check_in_date AT TIME ZONE 'UTC')::date, (check_out_date AT TIME ZONE 'UTC')::date)
                 )
             ) as is_booked,
             ARRAY_AGG(
@@ -108,7 +118,7 @@ const checkAvailability = async (cottageId, startDate, endDate) => {
         AND status NOT IN ('cancelled', 'completed')
         AND (check_out_date AT TIME ZONE 'UTC')::date >= ($2::timestamp AT TIME ZONE 'UTC')::date
         AND (check_in_date AT TIME ZONE 'UTC')::date <= ($3::timestamp AT TIME ZONE 'UTC')::date`,
-        [cottageId, startDate, endDate]
+        [cottageId, utcStartDate.toISOString(), utcEndDate.toISOString()]
     );
 
     const result = {
@@ -378,24 +388,16 @@ router.post('/', async (req, res) => {
         // Parse and validate dates
         let parsedStartDate, parsedEndDate;
         try {
-            // Parse dates to ensure they are valid
             parsedStartDate = new Date(startDate);
             parsedEndDate = new Date(endDate);
             
-            // Устанавливаем время заезда и выезда
-            parsedStartDate.setHours(14, 0, 0, 0);
-            parsedEndDate.setHours(12, 0, 0, 0);
+            if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
+                throw new Error('Invalid date format');
+            }
 
             console.log('\nParsed dates:');
             console.log('Start date:', parsedStartDate.toISOString());
             console.log('End date:', parsedEndDate.toISOString());
-
-            // Проверяем валидность дат
-            if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
-                return res.status(400).json({ 
-                    message: 'Некорректные даты бронирования'
-                });
-            }
         } catch (error) {
             console.error('Date parsing error:', error);
             return res.status(400).json({
@@ -404,7 +406,7 @@ router.post('/', async (req, res) => {
         }
 
         // Проверяем доступность
-        const availability = await checkAvailability(cottageId, parsedStartDate, parsedEndDate);
+        const availability = await checkAvailability(cottageId, parsedStartDate.toISOString(), parsedEndDate.toISOString());
         if (availability.isBooked) {
             return res.status(400).json({ 
                 message: 'Домик занят на выбранные даты',
@@ -431,8 +433,8 @@ router.post('/', async (req, res) => {
             guestName.trim(), 
             phone.trim(), 
             email?.trim() || null, 
-            parsedStartDate, 
-            parsedEndDate, 
+            parsedStartDate.toISOString(), 
+            parsedEndDate.toISOString(), 
             guests || 1, 
             'booked', 
             numericTariffId,
@@ -453,7 +455,7 @@ router.post('/', async (req, res) => {
 
         // Очищаем кэш
         bookingsCache.del(`cottage_${cottageId}`);
-        bookingsCache.del(`cottage_${cottageId}_date_${parsedStartDate}`);
+        bookingsCache.del(`cottage_${cottageId}_date_${parsedStartDate.toISOString()}`);
 
         console.log('\nBooking created successfully:', rows[0]);
         res.status(201).json(rows[0]);
@@ -608,6 +610,13 @@ router.put('/:id/check-out', async (req, res) => {
 // Get bookings by date
 router.get('/cottage/:cottageId/date/:date', async (req, res) => {
     try {
+        console.log(`\n=== GET /api/bookings/cottage/${req.params.cottageId}/date/${req.params.date} ===`);
+        console.log('Request date:', req.params.date);
+        
+        // Convert incoming date to UTC for database comparison
+        const utcDate = new Date(req.params.date);
+        console.log('UTC date:', utcDate.toISOString());
+        
         const { rows } = await pool.query(
             `SELECT 
                 b.booking_id as id,
@@ -615,8 +624,8 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
                 b.guest_name,
                 b.phone,
                 b.email,
-                b.check_in_date as check_in_date,
-                b.check_out_date as check_out_date,
+                b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
+                b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
                 b.status,
                 b.created_at,
                 c.name as cottage_name 
@@ -624,17 +633,27 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
             WHERE b.cottage_id = $1 
             AND b.status != 'cancelled'
-            AND (DATE($2::timestamp) BETWEEN DATE(b.check_in_date) AND DATE(b.check_out_date))
+            AND DATE($2 AT TIME ZONE 'Europe/Moscow') >= (b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')::date
+            AND DATE($2 AT TIME ZONE 'Europe/Moscow') < (b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')::date
             ORDER BY b.check_in_date DESC`,
             [req.params.cottageId, req.params.date]
         );
+        
+        console.log('\n=== Database Results ===');
+        console.log('Found bookings:', rows.length);
+        rows.forEach(row => {
+            console.log(`Booking ${row.id}:`);
+            console.log('  check_in_date:', row.check_in_date);
+            console.log('  check_out_date:', row.check_out_date);
+            console.log('  status:', row.status);
+        });
         
         // Преобразуем данные для Flutter
         const bookings = rows.map(row => ({
             id: row.id?.toString() || '',
             cottageId: row.cottage_id?.toString() || '',
-            startDate: row.check_in_date,
-            endDate: row.check_out_date,
+            startDate: row.check_in_date.toISOString().split('T')[0],
+            endDate: row.check_out_date.toISOString().split('T')[0],
             guests: row.guests || 1,
             status: row.status || 'booked',
             guestName: row.guest_name || '',
@@ -642,6 +661,15 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             email: row.email || '',
             cottageName: row.cottage_name || ''
         }));
+        
+        console.log('\n=== Sending to Client ===');
+        console.log('Sending bookings:', bookings.length);
+        bookings.forEach(booking => {
+            console.log(`Booking ${booking.id}:`);
+            console.log('  startDate:', booking.startDate);
+            console.log('  endDate:', booking.endDate);
+            console.log('  status:', booking.status);
+        });
         
         res.json(bookings);
     } catch (err) {

@@ -42,17 +42,60 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
         const SnackBar(content: Text('Бронирование успешно отменено!')),
       );
 
-      setState(() {
-        _bookingsFuture = Provider.of<BookingService>(context, listen: false)
-            .getBookingsByCottage(widget.cottageId);
-        _filteredBookings = [];
-      });
+      // Обновляем данные после отмены
+      await _refreshData();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка: $e')),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // Обновление данных о коттедже и бронированиях
+  Future<void> _refreshData() async {
+    if (_isLoading) return;
+    
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      // Обновляем данные о коттедже
+      _cottageFuture = Provider.of<CottageService>(context, listen: false)
+          .getCottage(widget.cottageId);
+      
+      // Обновляем данные о бронированиях
+      final newBookings = await Provider.of<BookingService>(context, listen: false)
+          .getBookingsByCottage(widget.cottageId);
+      
+      if (mounted) {
+        setState(() {
+          _bookingsFuture = Future.value(newBookings);
+          _filteredBookings = List.from(newBookings);
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Данные обновлены')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка обновления: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -87,23 +130,21 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
   }
 
   void _showBookingDialog(BuildContext context, Cottage cottage, DateTime selectedDate) {
-    final bookingService = Provider.of<BookingService>(context, listen: false);
     showDialog(
       context: context,
-      builder: (dialogContext) => BookingFormDialog(
+      builder: (context) => BookingFormDialog(
         cottage: cottage,
         selectedDate: selectedDate,
         onSubmit: (booking) async {
           await _createBooking(booking);
           // Обновляем список бронирований
-          if (mounted) {
-            setState(() {
-              _bookingsFuture = bookingService.getBookingsByCottage(widget.cottageId);
-              _filteredBookings = [];
-            });
-          }
+          setState(() {
+            _bookingsFuture = Provider.of<BookingService>(context, listen: false)
+                .getBookingsByCottage(widget.cottageId);
+            _filteredBookings = [];
+          });
         },
-        bookingService: bookingService,
+        bookingService: Provider.of<BookingService>(context, listen: false),
       ),
     );
   }
@@ -112,7 +153,25 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Домик'),
+        title: FutureBuilder<Cottage>(
+          future: _cottageFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.done) {
+              if (snapshot.hasError) {
+                return const Text('Ошибка загрузки');
+              }
+              return Text(snapshot.data?.name ?? 'Загрузка...');
+            }
+            return const Text('Загрузка...');
+          },
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _isLoading ? null : _refreshData,
+            tooltip: 'Обновить данные',
+          ),
+        ],
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: FutureBuilder<Cottage>(
@@ -189,9 +248,14 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
                             ),
                             const SizedBox(height: 16),
                             CalendarView(
+                              key: ValueKey(_filteredBookings.length), // Принудительное обновление при изменении бронирований
                               cottage: cottage,
                               bookings: _filteredBookings,
-                              onCancelBooking: _cancelBooking,
+                              onCancelBooking: (bookingId) async {
+                                await _cancelBooking(bookingId);
+                                // После отмены обновляем данные
+                                await _refreshData();
+                              },
                               onDateSelected: (selectedDate) async {
                                 try {
                                   final normalizedDate = DateTime(

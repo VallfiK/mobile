@@ -6,14 +6,14 @@ import 'package:intl/intl.dart';
 
 class BookingDialog extends StatefulWidget {
   final String cottageId;
-  final DateTime initialDate;
+  final DateTime selectedDate;
   final Function(Booking) onBookingCreated;
   final BookingService bookingService;
 
   const BookingDialog({
     super.key,
     required this.cottageId,
-    required this.initialDate,
+    required this.selectedDate,
     required this.onBookingCreated,
     required this.bookingService,
   });
@@ -87,9 +87,9 @@ class _BookingDialogState extends State<BookingDialog> {
 
     // Устанавливаем время заезда (14:00) и выезда (12:00)
     final checkInDateTime = DateTime(
-      widget.initialDate.year,
-      widget.initialDate.month,
-      widget.initialDate.day,
+      widget.selectedDate.year,
+      widget.selectedDate.month,
+      widget.selectedDate.day,
       14, // 14:00
     );
 
@@ -141,7 +141,7 @@ class _BookingDialogState extends State<BookingDialog> {
       final booking = Booking(
         id: '',
         cottageId: widget.cottageId,
-        startDate: widget.initialDate,
+        startDate: widget.selectedDate,
         endDate: _endDate!,
         guests: _guests,
         status: 'booked',
@@ -243,16 +243,16 @@ class _BookingDialogState extends State<BookingDialog> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Дата заезда: ${DateFormat('dd.MM.yyyy').format(widget.initialDate)}',
+                          'Дата заезда: ${DateFormat('dd.MM.yyyy').format(widget.selectedDate)}',
                         ),
                       ),
                       TextButton(
                         onPressed: () async {
                           final picked = await showDatePicker(
                             context: context,
-                            initialDate: _endDate ?? widget.initialDate.add(const Duration(days: 1)),
-                            firstDate: widget.initialDate.add(const Duration(days: 1)),
-                            lastDate: widget.initialDate.add(const Duration(days: 30)),
+                            initialDate: _endDate ?? widget.selectedDate.add(const Duration(days: 1)),
+                            firstDate: widget.selectedDate.add(const Duration(days: 1)),
+                            lastDate: widget.selectedDate.add(const Duration(days: 30)),
                           );
                           if (picked != null) {
                             setState(() => _endDate = picked);

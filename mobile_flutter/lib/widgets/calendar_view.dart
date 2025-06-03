@@ -82,6 +82,7 @@ class _CalendarViewState extends State<CalendarView> {
     super.didUpdateWidget(oldWidget);
     if (widget.bookings != oldWidget.bookings || 
         widget.cottage.id != oldWidget.cottage.id) {
+      _clearCaches();
       setState(() {
         _groupedBookings.clear();
         _groupBookings();
@@ -90,70 +91,43 @@ class _CalendarViewState extends State<CalendarView> {
   }
 
   void _groupBookings() {
-    print('DEBUG: _groupBookings called. Total bookings: ${widget.bookings.length}');
-    final newGroupedBookings = <DateTime, List<Booking>>{};
+    final Map<DateTime, List<Booking>> newGroupedBookings = {};
     
-    // Выводим все бронирования для отладки
-    for (var booking in widget.bookings) {
-      print('DEBUG: Available booking: ID=${booking.id}, status=${booking.status}, startDate=${booking.startDate}, endDate=${booking.endDate}');
-    }
+    // Сортируем бронирования по дате начала
+    final sortedBookings = List<Booking>.from(widget.bookings)
+      ..sort((a, b) => a.startDate?.compareTo(b.startDate ?? DateTime.now()) ?? 0);
     
-    for (var booking in widget.bookings) {
-      print('DEBUG: Processing booking ID: ${booking.id}, status: ${booking.status}');
-      print('DEBUG: Original dates - startDate: ${booking.startDate}, endDate: ${booking.endDate}');
+    for (var booking in sortedBookings) {
+      if (booking.startDate == null || booking.endDate == null) continue;
       
-      // Пропускаем отмененные бронирования
-      if (booking.status == 'cancelled') {
-        print('DEBUG: Skipping cancelled booking: ${booking.id}');
-        continue;
-      }
+      // Нормализуем даты (удаляем время)
+      final start = DateTime(
+        booking.startDate!.year, 
+        booking.startDate!.month, 
+        booking.startDate!.day
+      );
       
-      // Нормализуем даты для правильного отображения в календаре
-      // Используем только дату без времени для определения диапазона дней
-      final startDay = DateTime(booking.startDate.year, booking.startDate.month, booking.startDate.day);
-      final endDay = DateTime(booking.endDate.year, booking.endDate.month, booking.endDate.day);
+      final end = DateTime(
+        booking.endDate!.year, 
+        booking.endDate!.month, 
+        booking.endDate!.day
+      );
       
-      print('DEBUG: Normalized date range - startDay: $startDay, endDay: $endDay');
+      print('Обработка бронирования: ${booking.id} с $start по $end');
       
       // Добавляем бронирование на все даты в диапазоне
-      var currentDate = startDay;
-      
-      // Проверяем, что диапазон дат корректный
-      if (endDay.isBefore(startDay)) {
-        print('DEBUG: WARNING! End date is before start date: $endDay < $startDay');
-        // Если даты перепутаны, все равно добавляем хотя бы на день заезда
-        if (!newGroupedBookings.containsKey(startDay)) {
-          newGroupedBookings[startDay] = [];
-        }
-        if (!newGroupedBookings[startDay]!.any((b) => b.id == booking.id)) {
-          newGroupedBookings[startDay]!.add(booking);
-          print('DEBUG: Added booking ${booking.id} to date $startDay (single day due to invalid range)');
-        }
-        continue;
-      }
-      
-      print('DEBUG: Adding booking to date range: $currentDate to $endDay (inclusive)');
-      
-      // Добавляем каждый день в диапазоне бронирования (включая день выезда)
-      while (!currentDate.isAfter(endDay)) {
-        if (!newGroupedBookings.containsKey(currentDate)) {
-          newGroupedBookings[currentDate] = [];
+      for (var date = start; !date.isAfter(end); date = date.add(const Duration(days: 1))) {
+        final normalizedDate = DateTime(date.year, date.month, date.day);
+        
+        if (!newGroupedBookings.containsKey(normalizedDate)) {
+          newGroupedBookings[normalizedDate] = [];
         }
         
-        if (!newGroupedBookings[currentDate]!.any((b) => b.id == booking.id)) {
-          newGroupedBookings[currentDate]!.add(booking);
-          print('DEBUG: Added booking ${booking.id} to date $currentDate');
+        if (!newGroupedBookings[normalizedDate]!.contains(booking)) {
+          newGroupedBookings[normalizedDate]!.add(booking);
         }
-        
-        // Переходим к следующему дню
-        currentDate = currentDate.add(const Duration(days: 1));
       }
     }
-    
-    print('DEBUG: Final grouped bookings by date:');
-    newGroupedBookings.forEach((date, bookings) {
-      print('DEBUG: Date: $date, Bookings: ${bookings.length}, IDs: ${bookings.map((b) => b.id).join(', ')}');
-    });
     
     setState(() {
       _groupedBookings = newGroupedBookings;
@@ -183,64 +157,31 @@ class _CalendarViewState extends State<CalendarView> {
   }
 
   List<Booking> _getBookingsForDay(DateTime day) {
-    // Нормализуем день до полночи
     final normalizedDay = DateTime(day.year, day.month, day.day);
-    
-    print('DEBUG: _getBookingsForDay called for day: $normalizedDay');
-    print('DEBUG: Total bookings to check: ${widget.bookings.length}');
-    
-    // Используем кэш сгруппированных бронирований, если он доступен
-    if (_groupedBookings != null && _groupedBookings!.containsKey(normalizedDay)) {
-      print('DEBUG: Using cached bookings for day: $normalizedDay, count: ${_groupedBookings![normalizedDay]!.length}');
-      return _groupedBookings![normalizedDay]!;
-    }
-    
-    // Если кэш недоступен, фильтруем бронирования вручную
-    print('DEBUG: Cache miss for day: $normalizedDay, filtering manually');
-    final result = <Booking>[];
-    
-    for (var booking in widget.bookings) {
-      if (booking.status == 'cancelled') {
-        print('DEBUG: Skipping cancelled booking: ${booking.id}');
-        continue;
-      }
+    final bookings = widget.bookings.where((booking) {
+      if (booking.startDate == null || booking.endDate == null) return false;
       
-      print('DEBUG: Checking booking ID: ${booking.id}, startDate: ${booking.startDate}, endDate: ${booking.endDate}');
+      // Normalize booking dates to local time
+      final startDate = DateTime(
+        booking.startDate.year, 
+        booking.startDate.month, 
+        booking.startDate.day
+      );
       
-      // Нормализуем даты бронирования (только дата, без времени)
-      final bookingStartDay = DateTime(booking.startDate.year, booking.startDate.month, booking.startDate.day);
-      final bookingEndDay = DateTime(booking.endDate.year, booking.endDate.month, booking.endDate.day);
+      final endDate = DateTime(
+        booking.endDate.year,
+        booking.endDate.month,
+        booking.endDate.day
+      );
       
-      print('DEBUG: Normalized booking dates - startDay: $bookingStartDay, endDay: $bookingEndDay');
-      
-      // Проверяем корректность диапазона дат
-      if (bookingEndDay.isBefore(bookingStartDay)) {
-        print('DEBUG: WARNING! Invalid date range for booking ${booking.id}: end date is before start date');
-        // Даже если даты перепутаны, добавляем бронирование на день заезда
-        if (normalizedDay.isAtSameMomentAs(bookingStartDay)) {
-          print('DEBUG: Adding booking with invalid range to start day $normalizedDay');
-          result.add(booking);
-        }
-        continue;
-      }
-      
-      // Проверяем, входит ли день в диапазон бронирования (включая дни заезда и выезда)
-      if (normalizedDay.isAtSameMomentAs(bookingStartDay) || 
-          normalizedDay.isAtSameMomentAs(bookingEndDay) || 
-          (normalizedDay.isAfter(bookingStartDay) && normalizedDay.isBefore(bookingEndDay))) {
-        print('DEBUG: Day $normalizedDay is within booking range, adding booking ${booking.id}');
-        result.add(booking);
-      } else {
-        print('DEBUG: Day $normalizedDay is NOT within booking range for booking ${booking.id}');
-      }
-    }
+      // Check if the day is within the booking range (inclusive)
+      return (normalizedDay.isAtSameMomentAs(startDate) || 
+              normalizedDay.isAfter(startDate)) &&
+             (normalizedDay.isAtSameMomentAs(endDate) ||
+              normalizedDay.isBefore(endDate));
+    }).toList();
     
-    print('DEBUG: Found ${result.length} bookings for day: $normalizedDay');
-    if (result.isNotEmpty) {
-      print('DEBUG: Booking IDs for day $normalizedDay: ${result.map((b) => b.id).join(', ')}');
-    }
-    
-    return result;
+    return bookings;
   }
 
   bool _isDateBooked(DateTime day) {
@@ -253,133 +194,190 @@ class _CalendarViewState extends State<CalendarView> {
     
     if (bookings.isEmpty) return Colors.green;
     
-    // Получаем информацию о заезде/выезде и статусе
-    final (hasCheckIn, hasCheckOut, status) = _getDayStatus(day);
-    
-    // Если есть и заезд, и выезд, используем специальный виджет
-    if (hasCheckIn || hasCheckOut) {
-      // Цвет будет определен в SplitDayCellPainter
-      return Colors.transparent;
+    // Check for any checked-in bookings first (highest priority)
+    final checkedInBookings = bookings.where((b) => b.status == 'checked_in').toList();
+    if (checkedInBookings.isNotEmpty) {
+      return Colors.red;
     }
     
-    // Приоритет: checked_in > booked > checked_out > free
-    switch (status) {
-      case 'checked_in':
-        return Colors.red;
-      case 'booked':
-        return Colors.yellow;
-      case 'checked_out':
-        return Colors.orange;
-      default:
-        return Colors.green;
+    // Then check for any booked status
+    final bookedBookings = bookings.where((b) => b.status == 'booked').toList();
+    if (bookedBookings.isNotEmpty) {
+      return Colors.yellow;
     }
+    
+    // If no specific status, check if it's a check-in/check-out day
+    final isCheckInDay = _hasCheckIn(day, bookings);
+    final isCheckOutDay = _hasCheckOut(day, bookings);
+    
+    if (isCheckInDay && isCheckOutDay) {
+      // If it's both check-in and check-out, prioritize check-in
+      return Colors.yellow;
+    } else if (isCheckInDay) {
+      return Colors.yellow;
+    } else if (isCheckOutDay) {
+      return Colors.green;
+    }
+    
+    // Default to green if no specific status found
+    return Colors.green;
   }
-
-
 
   int _calculateBookingCost(Booking booking) {
     final days = booking.endDate.difference(booking.startDate).inDays;
     return (widget.cottage.price * days).toInt();
   }
 
-  // Проверяем, есть ли заезд в этот день
+  // Проверяем, является ли день днем заезда
   bool _hasCheckIn(DateTime day, List<Booking> bookings) {
     final normalizedDay = DateTime(day.year, day.month, day.day);
-    return bookings.any((booking) {
-      final bookingStartDay = DateTime(
-        booking.startDate.year, 
-        booking.startDate.month, 
+    
+    for (var booking in bookings) {
+      if (booking.startDate == null) continue;
+      
+      // Нормализуем дату заезда (без времени)
+      final checkInDate = DateTime(
+        booking.startDate.year,
+        booking.startDate.month,
         booking.startDate.day,
       );
-      return normalizedDay.isAtSameMomentAs(bookingStartDay);
-    });
+      
+      // Проверяем, является ли день первым днем бронирования
+      if (checkInDate.isAtSameMomentAs(normalizedDay)) {
+        print('День заезда: $normalizedDay для бронирования ${booking.id}');
+        return true;
+      }
+    }
+    
+    return false;
   }
 
-  // Проверяем, есть ли выезд в этот день
+  // Проверяем, является ли день днем выезда
   bool _hasCheckOut(DateTime day, List<Booking> bookings) {
     final normalizedDay = DateTime(day.year, day.month, day.day);
-    return bookings.any((booking) {
-      final bookingEndDay = DateTime(
-        booking.endDate.year, 
-        booking.endDate.month, 
+    
+    for (var booking in bookings) {
+      if (booking.endDate == null) continue;
+      
+      // Нормализуем дату выезда (без времени)
+      final checkOutDate = DateTime(
+        booking.endDate.year,
+        booking.endDate.month,
         booking.endDate.day,
       );
-      return normalizedDay.isAtSameMomentAs(bookingEndDay);
-    });
+      
+      // Проверяем, является ли день последним днем бронирования
+      if (checkOutDate.isAtSameMomentAs(normalizedDay)) {
+        print('День выезда: $normalizedDay для бронирования ${booking.id}');
+        return true;
+      }
+    }
+    
+    return false;
   }
 
-  // Получаем статус бронирований на день
-  (bool, bool, String) _getDayStatus(DateTime day) {
+  // Get the status of bookings for a specific day
+  (bool hasCheckIn, bool hasCheckOut, String status) _getDayStatus(DateTime day) {
     final bookings = _getBookingsForDay(day);
+    
+    if (bookings.isEmpty) {
+      return (false, false, 'free');
+    }
+    
+    // Check for any checked-in bookings (highest priority)
+    final checkedInBookings = bookings.where((b) => b.status == 'checked_in').toList();
+    if (checkedInBookings.isNotEmpty) {
+      return (
+        _hasCheckIn(day, checkedInBookings),
+        _hasCheckOut(day, checkedInBookings),
+        'checked_in'
+      );
+    }
+    
+    // Then check for any booked status
+    final bookedBookings = bookings.where((b) => b.status == 'booked').toList();
+    if (bookedBookings.isNotEmpty) {
+      return (
+        _hasCheckIn(day, bookedBookings),
+        _hasCheckOut(day, bookedBookings),
+        'booked'
+      );
+    }
+    
+    // If no specific status, check for check-in/check-out
     final hasCheckIn = _hasCheckIn(day, bookings);
     final hasCheckOut = _hasCheckOut(day, bookings);
     
-    // Определяем статус дня
-    String status = 'free';
-    if (bookings.isEmpty) {
-      status = 'free';
-    } else if (bookings.any((b) => b.status == 'checked_in')) {
-      status = 'checked_in';
-    } else if (bookings.any((b) => b.status == 'booked')) {
-      status = 'booked';
-    }
-    
-    return (hasCheckIn, hasCheckOut, status);
+    return (
+      hasCheckIn,
+      hasCheckOut,
+      hasCheckIn ? 'booked' : hasCheckOut ? 'free' : 'free'
+    );
   }
 
-  // Виджет для отображения разделенной ячейки
+  // Widget to display a split cell for days with check-in/check-out
   Widget _buildSplitDayCell(DateTime day, bool hasCheckIn, bool hasCheckOut, String status) {
+    final isToday = isSameDay(day, DateTime.now());
+    final isSelected = isSameDay(day, _selectedDay);
+    
     return Center(
       child: Stack(
         children: [
           Container(
-            width: 35,
-            height: 35,
+            width: 40,
+            height: 40,
+            margin: const EdgeInsets.all(2),
             child: CustomPaint(
               painter: SplitDayCellPainter(
                 hasCheckIn: hasCheckIn,
                 hasCheckOut: hasCheckOut,
                 status: status,
+                isToday: isToday,
+                isSelected: isSelected,
               ),
               child: Center(
                 child: Text(
                   '${day.day}',
                   style: TextStyle(
-                    color: Colors.black,
+                    color: isToday || isSelected ? Colors.blue : Colors.black,
                     fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
               ),
             ),
           ),
-          // Показываем индикатор выезда
           if (hasCheckOut)
             Positioned(
-              right: 0,
-              bottom: 0,
+              right: 2,
+              bottom: 2,
               child: Container(
-                width: 8,
-                height: 8,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   color: Colors.green,
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1),
+                  border: Border.all(
+                    color: isSelected ? Colors.blue : Colors.white, 
+                    width: isSelected ? 1.5 : 1.0,
+                  ),
                 ),
               ),
             ),
-          // Показываем индикатор заезда
           if (hasCheckIn)
             Positioned(
-              left: 0,
-              top: 0,
+              left: 2,
+              top: 2,
               child: Container(
-                width: 8,
-                height: 8,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   color: status == 'checked_in' ? Colors.red : Colors.yellow,
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1),
+                  border: Border.all(
+                    color: isSelected ? Colors.blue : Colors.white, 
+                    width: isSelected ? 1.5 : 1.0,
+                  ),
                 ),
               ),
             ),
@@ -519,15 +517,16 @@ class _CalendarViewState extends State<CalendarView> {
               },
               calendarBuilders: CalendarBuilders(
                 defaultBuilder: (context, day, focusedDay) {
-                  // Получаем информацию о заезде/выезде и статусе дня
                   final (hasCheckIn, hasCheckOut, status) = _getDayStatus(day);
+                  final isToday = isSameDay(day, DateTime.now());
+                  final isSelected = isSameDay(day, _selectedDay);
                   
-                  // Если есть заезд или выезд, используем специальный виджет
+                  // Use the split cell for days with check-in/check-out
                   if (hasCheckIn || hasCheckOut) {
                     return _buildSplitDayCell(day, hasCheckIn, hasCheckOut, status);
                   }
                   
-                  // Для обычных дней используем стандартный вид
+                  // For normal days, use a simple circle
                   final color = _getDateColor(day);
                   return Container(
                     margin: const EdgeInsets.all(4),
@@ -535,11 +534,73 @@ class _CalendarViewState extends State<CalendarView> {
                     decoration: BoxDecoration(
                       color: color.withOpacity(0.3),
                       shape: BoxShape.circle,
+                      border: isToday
+                          ? Border.all(color: Colors.blue, width: 2)
+                          : isSelected
+                              ? Border.all(color: Colors.blue, width: 2)
+                              : null,
                     ),
                     child: Text(
                       '${day.day}',
                       style: TextStyle(
-                        color: Colors.black87,
+                        color: isToday || isSelected
+                            ? Colors.blue
+                            : Colors.black87,
+                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  );
+                },
+                todayBuilder: (context, day, focusedDay) {
+                  final (hasCheckIn, hasCheckOut, status) = _getDayStatus(day);
+                  final isSelected = isSameDay(day, _selectedDay);
+                  
+                  // Use the split cell for days with check-in/check-out
+                  if (hasCheckIn || hasCheckOut) {
+                    return _buildSplitDayCell(day, hasCheckIn, hasCheckOut, status);
+                  }
+                  
+                  // For today, show a special style
+                  final color = _getDateColor(day);
+                  return Container(
+                    margin: const EdgeInsets.all(4),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.3),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.blue, width: 2),
+                    ),
+                    child: Text(
+                      '${day.day}',
+                      style: const TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  );
+                },
+                selectedBuilder: (context, day, focusedDay) {
+                  final (hasCheckIn, hasCheckOut, status) = _getDayStatus(day);
+                  
+                  // Use the split cell for days with check-in/check-out
+                  if (hasCheckIn || hasCheckOut) {
+                    return _buildSplitDayCell(day, hasCheckIn, hasCheckOut, status);
+                  }
+                  
+                  // For selected day, show a special style
+                  final color = _getDateColor(day);
+                  return Container(
+                    margin: const EdgeInsets.all(4),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.blue, width: 2),
+                    ),
+                    child: Text(
+                      '${day.day}',
+                      style: const TextStyle(
+                        color: Colors.blue,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -608,7 +669,7 @@ class _CalendarViewState extends State<CalendarView> {
                                         context: context,
                                         builder: (context) => BookingDialog(
                                           cottageId: widget.cottage.id,
-                                          initialDate: _selectedDay!,
+                                          selectedDate: _selectedDay!,
                                           onBookingCreated: (booking) {
                                             setState(() {
                                               _groupBookings();
@@ -625,12 +686,19 @@ class _CalendarViewState extends State<CalendarView> {
                             }
 
                             final booking = selectedDayBookings[index];
-                            final isCheckOutDay = booking.endDate.year == _selectedDay!.year &&
-                                                booking.endDate.month == _selectedDay!.month &&
-                                                booking.endDate.day == _selectedDay!.day;
-                            final isCheckInDay = booking.startDate.year == _selectedDay!.year &&
-                                               booking.startDate.month == _selectedDay!.month &&
-                                               booking.startDate.day == _selectedDay!.day;
+                            // Для даты выезда показываем чип только если это последний день бронирования
+                            final isCheckOutDay = _selectedDay!.isAtSameMomentAs(DateTime(
+                              booking.endDate.year,
+                              booking.endDate.month,
+                              booking.endDate.day,
+                            ));
+                            
+                            // Для даты заезда показываем чип только если это первый день бронирования
+                            final isCheckInDay = _selectedDay!.isAtSameMomentAs(DateTime(
+                              booking.startDate.year,
+                              booking.startDate.month,
+                              booking.startDate.day,
+                            ));
 
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
@@ -685,9 +753,18 @@ class _CalendarViewState extends State<CalendarView> {
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
-                                        Text(
-                                          'С ${DateFormat('dd.MM.yyyy HH:mm').format(booking.startDate)} по ${DateFormat('dd.MM.yyyy HH:mm').format(booking.endDate)}',
-                                        ),
+                                        if (booking.startDate != null && booking.endDate != null)
+                                          Builder(
+                                            builder: (context) {
+                                              final startDate = booking.startDate!;
+                                              final endDate = booking.endDate!;
+                                              
+                                              return Text(
+                                                'С ${DateFormat('dd.MM.yyyy').format(startDate)} по ${DateFormat('dd.MM.yyyy').format(endDate)}',
+                                                style: const TextStyle(fontSize: 13),
+                                              );
+                                            },
+                                          ),
                                         Text(
                                           'Количество гостей: ${booking.guests}',
                                           style: TextStyle(color: Colors.grey[600]),
@@ -874,149 +951,108 @@ class _CalendarViewState extends State<CalendarView> {
   }
 }
 
-// Добавляем новый класс для отрисовки разделенной ячейки
+// Custom painter for split calendar cells
 class SplitDayCellPainter extends CustomPainter {
   final bool hasCheckIn;
   final bool hasCheckOut;
   final String status;
+  final bool isToday;
+  final bool isSelected;
 
   SplitDayCellPainter({
     required this.hasCheckIn,
     required this.hasCheckOut,
     required this.status,
+    this.isToday = false,
+    this.isSelected = false,
   });
 
-  Color getStatusColor(String status) {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint()..style = PaintingStyle.fill;
+    final double radius = size.width / 2;
+    final center = Offset(radius, radius);
+
+    // Draw the base circle
+    if (isSelected) {
+      paint.color = Colors.blue.withOpacity(0.1);
+      canvas.drawCircle(center, radius, paint);
+    } else if (isToday) {
+      paint.color = Colors.blue.withOpacity(0.05);
+      canvas.drawCircle(center, radius, paint);
+    }
+
+    // Draw the split cell if needed
+    if (hasCheckIn && hasCheckOut) {
+      // Draw the check-out (free) half
+      paint.color = Colors.green.withOpacity(0.3);
+      
+      // Draw a semi-circle for check-out
+      final checkOutPath = Path()
+        ..moveTo(radius, 0)
+        ..lineTo(radius, radius * 2)
+        ..lineTo(0, radius * 2)
+        ..arcToPoint(
+          Offset(0, 0),
+          radius: Radius.circular(radius),
+          clockwise: false,
+        )
+        ..close();
+      
+      canvas.drawPath(checkOutPath, paint);
+      
+      // Draw the check-in half with status color
+      paint.color = _getStatusColor(status).withOpacity(0.3);
+      
+      // Draw a semi-circle for check-in
+      final checkInPath = Path()
+        ..moveTo(radius, 0)
+        ..lineTo(radius * 2, 0)
+        ..lineTo(radius * 2, radius * 2)
+        ..lineTo(radius, radius * 2)
+        ..close();
+      
+      canvas.drawPath(checkInPath, paint);
+    } else if (hasCheckIn) {
+      // Only check-in
+      paint.color = _getStatusColor(status).withOpacity(0.3);
+      canvas.drawCircle(center, radius, paint);
+    } else if (hasCheckOut) {
+      // Only check-out
+      paint.color = Colors.green.withOpacity(0.3);
+      canvas.drawCircle(center, radius, paint);
+    }
+
+    // Draw the border
+    final borderPaint = Paint()
+      ..color = isSelected 
+          ? Colors.blue 
+          : isToday 
+              ? Colors.blue.withOpacity(0.7) 
+              : Colors.grey.withOpacity(0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = isSelected ? 1.5 : 1.0;
+    
+    canvas.drawCircle(center, radius - borderPaint.strokeWidth / 2, borderPaint);
+  }
+
+  Color _getStatusColor(String status) {
     switch (status) {
       case 'checked_in':
         return Colors.red;
       case 'booked':
         return Colors.yellow;
-      case 'checked_out':
-        return Colors.orange;
       default:
         return Colors.green;
     }
   }
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint();
-    final double radius = size.width / 2;
-
-    if (hasCheckIn && hasCheckOut) {
-      // День и заезда, и выезда - рисуем диагональное разделение
-      
-      // Заполняем нижнюю половину (выезд)
-      paint.color = Colors.green.withOpacity(0.4);
-      final checkOutPath = Path()
-        ..moveTo(0, size.height)
-        ..lineTo(size.width, size.height)
-        ..lineTo(size.width, 0)
-        ..lineTo(0, size.height)
-        ..close();
-      canvas.drawPath(checkOutPath, paint);
-      
-      // Заполняем верхнюю половину (заезд)
-      paint.color = getStatusColor(status).withOpacity(0.4);
-      final checkInPath = Path()
-        ..moveTo(0, 0)
-        ..lineTo(size.width, 0)
-        ..lineTo(0, size.height)
-        ..close();
-      canvas.drawPath(checkInPath, paint);
-      
-      // Рисуем диагональную линию разделения
-      final dividerPaint = Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
-      canvas.drawLine(
-        Offset(0, size.height),
-        Offset(size.width, 0),
-        dividerPaint
-      );
-      
-    } else if (hasCheckOut) {
-      // Только выезд
-      paint.color = Colors.green.withOpacity(0.3);
-      canvas.drawCircle(Offset(radius, radius), radius, paint);
-      
-      // Добавляем стрелку выезда
-      final arrowPaint = Paint()
-        ..color = Colors.green.shade700
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
-      
-      // Рисуем стрелку вправо
-      canvas.drawLine(
-        Offset(size.width * 0.3, size.height * 0.5),
-        Offset(size.width * 0.7, size.height * 0.5),
-        arrowPaint
-      );
-      
-      // Наконечник стрелки
-      canvas.drawLine(
-        Offset(size.width * 0.7, size.height * 0.5),
-        Offset(size.width * 0.6, size.height * 0.4),
-        arrowPaint
-      );
-      canvas.drawLine(
-        Offset(size.width * 0.7, size.height * 0.5),
-        Offset(size.width * 0.6, size.height * 0.6),
-        arrowPaint
-      );
-      
-    } else if (hasCheckIn) {
-      // Только заезд
-      paint.color = getStatusColor(status).withOpacity(0.3);
-      canvas.drawCircle(Offset(radius, radius), radius, paint);
-      
-      // Добавляем стрелку заезда
-      final arrowPaint = Paint()
-        ..color = status == 'checked_in' ? Colors.red.shade700 : Colors.yellow.shade700
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
-      
-      // Рисуем стрелку влево
-      canvas.drawLine(
-        Offset(size.width * 0.7, size.height * 0.5),
-        Offset(size.width * 0.3, size.height * 0.5),
-        arrowPaint
-      );
-      
-      // Наконечник стрелки
-      canvas.drawLine(
-        Offset(size.width * 0.3, size.height * 0.5),
-        Offset(size.width * 0.4, size.height * 0.4),
-        arrowPaint
-      );
-      canvas.drawLine(
-        Offset(size.width * 0.3, size.height * 0.5),
-        Offset(size.width * 0.4, size.height * 0.6),
-        arrowPaint
-      );
-    } else {
-      // Обычный день без заезда/выезда
-      paint.color = Colors.green.withOpacity(0.2);
-      canvas.drawCircle(Offset(radius, radius), radius, paint);
-    }
-
-    // Рисуем границу ячейки
-    final borderPaint = Paint()
-      ..color = Colors.grey
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    canvas.drawCircle(Offset(radius, radius), radius, borderPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    if (oldDelegate is SplitDayCellPainter) {
-      return oldDelegate.hasCheckIn != hasCheckIn ||
-             oldDelegate.hasCheckOut != hasCheckOut ||
-             oldDelegate.status != status;
-    }
-    return true;
+  bool shouldRepaint(covariant SplitDayCellPainter oldDelegate) {
+    return hasCheckIn != oldDelegate.hasCheckIn ||
+           hasCheckOut != oldDelegate.hasCheckOut ||
+           status != oldDelegate.status ||
+           isToday != oldDelegate.isToday ||
+           isSelected != oldDelegate.isSelected;
   }
 }
