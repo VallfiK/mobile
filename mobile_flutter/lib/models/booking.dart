@@ -12,9 +12,6 @@ class Booking {
   final String email;
   final String notes;
   final double totalCost;
-  final double prepayment;
-  final double totalPaid;
-  final double remaining;
   final String tariffId;
 
   Booking({
@@ -29,9 +26,6 @@ class Booking {
     required this.email,
     this.notes = '',
     this.totalCost = 0,
-    this.prepayment = 0,
-    this.totalPaid = 0,
-    this.remaining = 0,
     required this.tariffId,
   });
 
@@ -80,27 +74,26 @@ class Booking {
     
     return Booking(
       id: id,
-      cottageId: json['cottageId']?.toString() ?? '',
-      startDate: parseDate(json['startDate']),
-      endDate: parseDate(json['endDate']),
-      guests: json['guests']?.toInt() ?? 1,
-      status: json['status'] ?? 'pending',
-      guestName: json['guestName'] ?? '',
-      phone: json['phone'] ?? '',
-      email: json['email'] ?? '',
-      notes: json['notes'] ?? '',
-      totalCost: double.tryParse(json['totalCost']?.toString() ?? '0') ?? 0,
-      prepayment: double.tryParse(json['prepayment']?.toString() ?? '0') ?? 0,
-      totalPaid: double.tryParse(json['totalPaid']?.toString() ?? '0') ?? 0,
-      remaining: double.tryParse(json['remaining']?.toString() ?? '0') ?? 0,
-      tariffId: json['tariffId']?.toString() ?? '',
+      cottageId: json['cottage_id']?.toString() ?? json['cottageId']?.toString() ?? '',
+      startDate: startDate,
+      endDate: endDate,
+      guests: json['guests'] ?? 1,
+      status: json['status'] ?? 'booked',
+      guestName: json['guest_name']?.toString() ?? json['guestName']?.toString() ?? '',
+      phone: json['phone']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      notes: json['notes']?.toString() ?? '',
+      totalCost: json['total_cost'] != null 
+          ? double.tryParse(json['total_cost'].toString()) ?? 0.0 
+          : json['totalCost'] != null
+              ? double.tryParse(json['totalCost'].toString()) ?? 0.0
+              : 0.0,
+      tariffId: json['tariff_id']?.toString() ?? json['tariffId']?.toString() ?? '1',
     );
-  }
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
       'cottageId': cottageId,
       'startDate': startDate.toIso8601String(),
       'endDate': endDate.toIso8601String(),
@@ -110,11 +103,8 @@ class Booking {
       'phone': phone,
       'email': email,
       'notes': notes,
-      'totalCost': totalCost,
-      'prepayment': prepayment,
-      'totalPaid': totalPaid,
-      'remaining': remaining,
       'tariffId': tariffId,
+      'totalCost': totalCost,
     };
   }
 
@@ -130,9 +120,6 @@ class Booking {
     String? email,
     String? notes,
     double? totalCost,
-    double? prepayment,
-    double? totalPaid,
-    double? remaining,
     String? tariffId,
   }) {
     return Booking(
@@ -147,11 +134,7 @@ class Booking {
       email: email ?? this.email,
       notes: notes ?? this.notes,
       totalCost: totalCost ?? this.totalCost,
-      prepayment: prepayment ?? this.prepayment,
-      totalPaid: totalPaid ?? this.totalPaid,
-      remaining: remaining ?? this.remaining,
       tariffId: tariffId ?? this.tariffId,
     );
   }
-}  // Закрывающая фигурная скобка класса Booking
 }
