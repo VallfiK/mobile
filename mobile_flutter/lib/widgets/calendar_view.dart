@@ -10,6 +10,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import '../services/booking_service.dart';
 import 'dart:async';
+import 'package:flutter/widgets.dart' show Center;
 
 class CalendarView extends StatefulWidget {
   final Cottage cottage;
@@ -36,8 +37,8 @@ class _CalendarViewState extends State<CalendarView> {
   bool _localeInitialized = false;
   bool _isLoading = false;
   Timer? _debounceTimer;
-  final _bookingCache = <String, List<Booking>>{};
-  final _dateAvailabilityCache = <String, bool>{};
+  final Map<String, List<Booking>> _bookingCache = {};
+  final Map<String, bool> _dateAvailabilityCache = {};
 
   // Добавляем время заезда и выезда как константы
   static const checkOutTime = TimeOfDay(hour: 12, minute: 0);
@@ -49,6 +50,166 @@ class _CalendarViewState extends State<CalendarView> {
     _initializeLocale();
     _groupBookings();
   }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _clearCaches() {
+    _bookingCache.clear();
+    _dateAvailabilityCache.clear();
+  }
+
+  String _getCacheKey(DateTime date) {
+    return '${date.year}-${date.month}-${date.day}';
+  }
+
+  Future<void> _initializeLocale() async {
+    if (!_localeInitialized) {
+      await initializeDateFormatting('ru_RU', null);
+      _localeInitialized = true;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant CalendarView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cottage != widget.cottage) {
+      _clearCaches();
+      _groupBookings();
+    }
+  }
+
+  Future<void> _groupBookings() async {
+    if (!_localeInitialized) await _initializeLocale();
+
+    setState(() {
+      _isLoading = true;
+      _groupedBookings.clear();
+    });
+
+    try {
+      for (var booking in widget.bookings) {
+        final start = DateTime(
+          booking.startDate.year,
+          booking.startDate.month,
+          booking.startDate.day,
+        );
+
+        final end = DateTime(
+          booking.endDate.year,
+          booking.endDate.month,
+          booking.endDate.day,
+        );
+
+        for (var date = start; date.isBefore(end); date = date.add(const Duration(days: 1))) {
+          final dateKey = DateTime(
+            date.year,
+            date.month,
+            date.day,
+          );
+
+          if (!_groupedBookings.containsKey(dateKey)) {
+            _groupedBookings[dateKey] = [];
+          }
+          _groupedBookings[dateKey]!.add(booking);
+        }
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  List<Booking> _getBookingsForDay(DateTime day) {
+    final normalizedDay = DateTime(
+      day.year,
+      day.month,
+      day.day,
+    );
+
+    return _groupedBookings[normalizedDay] ?? [];
+  }
+
+  bool _isDateBooked(DateTime day) {
+    return _getBookingsForDay(day).isNotEmpty;
+  }
+
+  Color _getDateColor(DateTime day) {
+    if (_isDateBooked(day)) {
+      return Colors.blue;
+    }
+    return Colors.grey;
+  }
+
+  // Добавляем константы для статусов
+  static const String statusFree = 'free';
+  static const String statusBooked = 'booked';
+
+  (bool, bool, String) _getDayStatus(DateTime day) {
+    final bookings = _getBookingsForDay(day);
+    if (bookings.isEmpty) return (false, false, statusFree);
+
+    final hasCheckIn = _hasCheckIn(day, bookings);
+    final hasCheckOut = _hasCheckOut(day, bookings);
+
+    return (
+      hasCheckIn,
+      hasCheckOut,
+      hasCheckIn || hasCheckOut ? statusBooked : statusFree
+    );
+  }
+
+  bool _hasCheckIn(DateTime day, List<Booking> bookings) {
+    return bookings.any((booking) {
+      final checkIn = DateTime(
+        booking.startDate.year,
+        booking.startDate.month,
+        booking.startDate.day,
+      );
+      return isSameDay(day, checkIn);
+    });
+  }
+
+  bool _hasCheckOut(DateTime day, List<Booking> bookings) {
+    return bookings.any((booking) {
+      final checkOut = DateTime(
+        booking.endDate.year,
+        booking.endDate.month,
+        booking.endDate.day,
+      );
+      return isSameDay(day, checkOut);
+    });
+  }
+
+  Future<bool> _checkDateAvailability(DateTime date) async {
+    if (_isLoading) return false;
+
+    final cacheKey = _getCacheKey(date);
+    if (_dateAvailabilityCache.containsKey(cacheKey)) {
+      return _dateAvailabilityCache[cacheKey]!;
+    }
+
+    final normalizedDate = DateTime(date.year, date.month, date.day);
+    final bookings = _getBookingsForDay(normalizedDate);
+
+    // Проверяем бронирования на этот день
+    if (bookings.isEmpty) {
+      _dateAvailabilityCache[cacheKey] = true;
+      return true;
+    }
+
+    // Проверяем, есть ли свободные места (например, если домик на 4 гостя, а забронировано только на 2)
+    final totalGuests = bookings.fold(0, (sum, booking) => sum + booking.guests);
+    final maxGuests = 4; // TODO: Получать из данных о домике
+
+    _dateAvailabilityCache[cacheKey] = totalGuests < maxGuests;
+    return _dateAvailabilityCache[cacheKey]!;
+  }
+}
 
   @override
   void dispose() {
@@ -315,59 +476,139 @@ class _CalendarViewState extends State<CalendarView> {
     );
   }
 
-  // Widget to display a split cell for days with check-in/check-out
   Widget _buildSplitDayCell(DateTime day, bool hasCheckIn, bool hasCheckOut, String status) {
     final isToday = isSameDay(day, DateTime.now());
     final isSelected = isSameDay(day, _selectedDay);
-    
-    return Center(
+    final bookings = _getBookingsForDay(day);
+    final booking = bookings.isNotEmpty ? bookings.first : null;
+
+    return Container(
+      width: 40,
+      height: 40,
+      margin: const EdgeInsets.all(2),
       child: Stack(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            margin: const EdgeInsets.all(2),
-            child: CustomPaint(
-              painter: SplitDayCellPainter(
-                hasCheckIn: hasCheckIn,
-                hasCheckOut: hasCheckOut,
-                status: status,
-                isToday: isToday,
-                isSelected: isSelected,
-              ),
-              child: Center(
-                child: Text(
-                  '${day.day}',
-                  style: TextStyle(
-                    color: isToday || isSelected ? Colors.blue : Colors.black,
-                    fontSize: 14,
-                    fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
+          CustomPaint(
+            painter: SplitDayCellPainter(
+              hasCheckIn: hasCheckIn,
+              hasCheckOut: hasCheckOut,
+              status: status,
+              isToday: isToday,
+              isSelected: isSelected,
+            ),
+            size: const Size(double.infinity, double.infinity),
+          ),
+          Center(
+            child: Text(
+              '${day.day}',
+              style: const TextStyle(
+                color: Colors.black,
+                fontSize: 14,
+                fontWeight: FontWeight.normal,
               ),
             ),
           ),
           if (hasCheckOut)
             Positioned(
               right: 2,
+              top: 2,
+              child: Icon(
+                Icons.check_out,
+                size: 16,
+                color: Colors.blue,
+              ),
+            ),
+          if (hasCheckIn)
+            Positioned(
+              left: 2,
               bottom: 2,
+              child: Icon(
+                Icons.check_in,
+                size: 16,
+                color: Colors.green,
+              ),
+            ),
+          if (booking != null)
+            Positioned(
+              bottom: 2,
+              left: 2,
               child: Container(
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 decoration: BoxDecoration(
-                  color: Colors.green,
+                  color: Colors.grey[300],
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: isSelected ? Colors.blue : Colors.white, 
                     width: isSelected ? 1.5 : 1.0,
                   ),
                 ),
+                child: Center(
+                  child: Text(
+                    booking.status == 'checked_in' 
+                        ? '${booking.totalPaid.toStringAsFixed(0)}₽' 
+                        : '${booking.prepayment.toStringAsFixed(0)}₽',
+                    style: const TextStyle(
+                      fontSize: 6,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDayCell(DateTime day, bool hasCheckIn, bool hasCheckOut, String status) {
+    final isToday = isSameDay(day, DateTime.now());
+    final isSelected = isSameDay(day, _selectedDay);
+
+    return Container(
+      width: 40,
+      height: 40,
+      margin: const EdgeInsets.all(2),
+      child: Stack(
+        children: [
+          CustomPaint(
+            painter: SplitDayCellPainter(
+              hasCheckIn: hasCheckIn,
+              hasCheckOut: hasCheckOut,
+              status: status,
+              isToday: isToday,
+              isSelected: isSelected,
+            ),
+            size: const Size(double.infinity, double.infinity),
+          ),
+          const Center(
+            child: Text(
+              '${day.day}',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 14,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ),
+          if (hasCheckOut)
+            Positioned(
+              right: 2,
+              top: 2,
+              child: Icon(
+                Icons.check_out,
+                size: 16,
+                color: Colors.blue,
               ),
             ),
           if (hasCheckIn)
             Positioned(
               left: 2,
-              top: 2,
+              bottom: 2,
+              child: Icon(
+                Icons.check_in,
+                size: 16,
+                color: Colors.green,
               child: Container(
                 width: 10,
                 height: 10,
@@ -402,15 +643,11 @@ class _CalendarViewState extends State<CalendarView> {
     bool hasConflict = false;
     for (var booking in bookings) {
       // Если это дата выезда (check-out)
-      if (booking.endDate.year == date.year &&
-          booking.endDate.month == date.month &&
-          booking.endDate.day == date.day) {
+      if (isSameDay(booking.endDate, normalizedDate)) {
         // Проверяем, нет ли других заездов до 14:00
         final otherBookings = bookings.where((b) => 
           b.id != booking.id &&
-          b.startDate.year == date.year &&
-          b.startDate.month == date.month &&
-          b.startDate.day == date.day
+          isSameDay(b.startDate, normalizedDate)
         );
         
         if (otherBookings.isEmpty) {
@@ -431,13 +668,19 @@ class _CalendarViewState extends State<CalendarView> {
     
     // В остальных случаях проверяем через API
     try {
-      _isLoading = true;
+      setState(() {
+        _isLoading = true;
+      });
       final response = await widget.onDateSelected?.call(normalizedDate);
       final isAvailable = response?.isEmpty ?? false;
-      _dateAvailabilityCache[cacheKey] = isAvailable;
+      setState(() {
+        _dateAvailabilityCache[cacheKey] = isAvailable;
+      });
       return isAvailable;
     } finally {
-      _isLoading = false;
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -452,28 +695,20 @@ class _CalendarViewState extends State<CalendarView> {
       final isAvailable = await _checkDateAvailability(selectedDate);
       if (!mounted) return;
       
+      // Всегда вызываем onDateSelected, даже если дата занята
+      // Это позволит показать информацию о бронировании
+      widget.onDateSelected?.call(selectedDate);
+      
+      // Если дата доступна для бронирования, показываем сообщение
       if (isAvailable) {
-        widget.onDateSelected?.call(selectedDate);
-      } else {
-        // Проверяем, есть ли выезд в этот день
-        final bookings = _getBookingsForDay(selectedDate);
-        final hasCheckOut = bookings.any((booking) =>
-          booking.endDate.year == selectedDate.year &&
-          booking.endDate.month == selectedDate.month &&
-          booking.endDate.day == selectedDate.day
-        );
-
-        // Показываем соответствующее сообщение
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              hasCheckOut
-                ? 'В этот день есть выезд в 12:00 и возможен заезд в 14:00'
-                : 'Выбранная дата недоступна для бронирования'
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Дата доступна для бронирования'),
+              duration: Duration(seconds: 2),
             ),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+          );
+        }
       }
     });
   }
@@ -828,7 +1063,7 @@ class _CalendarViewState extends State<CalendarView> {
                                               onPressed: () async {
                                                 try {
                                                   await Provider.of<BookingService>(context, listen: false)
-                                                      .updateBookingStatus(booking.id, 'checked_out');
+                                                      .checkoutBooking(booking.id);
                                                   
                                                   if (mounted) {
                                                     ScaffoldMessenger.of(context).showSnackBar(

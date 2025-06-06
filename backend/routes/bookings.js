@@ -25,7 +25,9 @@ const createBookingsTableSQL = `
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         guests INTEGER DEFAULT 1,
         cancelled_at TIMESTAMP,
-        tariff_id INTEGER REFERENCES lesbaza.tariffs(tariff_id)
+        tariff_id INTEGER REFERENCES lesbaza.tariffs(tariff_id),
+        prepayment DECIMAL(10, 2) DEFAULT 0,
+        total_paid DECIMAL(10, 2) DEFAULT 0 
     );
 `;
 
@@ -36,15 +38,13 @@ const setupTablesSQL = `
         name VARCHAR(100) NOT NULL,
         price_per_day DECIMAL(10, 2) NOT NULL
     );
+`;
 
-    -- Добавляем базовые тарифы, если их нет
-    INSERT INTO lesbaza.tariffs (name, price_per_day)
-    SELECT 'Стандартный', 5000.00
-    WHERE NOT EXISTS (SELECT 1 FROM lesbaza.tariffs WHERE name = 'Стандартный');
-
-    INSERT INTO lesbaza.tariffs (name, price_per_day)
-    SELECT 'Выходной', 6000.00
-    WHERE NOT EXISTS (SELECT 1 FROM lesbaza.tariffs WHERE name = 'Выходной');
+// SQL для добавления полей prepayment и total_paid в существующую таблицу
+const addPaymentsColumnsSQL = `
+    ALTER TABLE lesbaza.bookings 
+    ADD COLUMN IF NOT EXISTS prepayment DECIMAL(10, 2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS total_paid DECIMAL(10, 2) DEFAULT 0;
 `;
 
 // Выполняем SQL при старте сервера
@@ -56,11 +56,17 @@ pool.query(setupTablesSQL)
     .then(() => console.log('Tables and tariffs set up successfully'))
     .catch(err => console.error('Error setting up tables:', err));
 
+// Добавляем поля для платежей, если их еще нет
+pool.query(addPaymentsColumnsSQL)
+    .then(() => console.log('Payment columns added successfully'))
+    .catch(err => console.error('Error adding payment columns:', err));
+
 // Добавляем индексы для оптимизации запросов
 const createIndexesSQL = `
-    CREATE INDEX IF NOT EXISTS idx_bookings_dates ON lesbaza.bookings (check_in_date, check_out_date);
-    CREATE INDEX IF NOT EXISTS idx_bookings_cottage ON lesbaza.bookings (cottage_id);
-    CREATE INDEX IF NOT EXISTS idx_bookings_status ON lesbaza.bookings (status);
+    CREATE INDEX IF NOT EXISTS idx_bookings_cottage_id ON lesbaza.bookings(cottage_id);
+    CREATE INDEX IF NOT EXISTS idx_bookings_status ON lesbaza.bookings(status);
+    CREATE INDEX IF NOT EXISTS idx_bookings_check_in ON lesbaza.bookings(check_in_date);
+    CREATE INDEX IF NOT EXISTS idx_bookings_check_out ON lesbaza.bookings(check_out_date);
 `;
 
 // Выполняем SQL при старте сервера
@@ -146,6 +152,8 @@ router.get('/', async (req, res) => {
                 b.status,
                 b.created_at,
                 b.guests,
+                b.prepayment,
+                b.total_paid,
                 c.name as cottage_name,
                 t.name as tariff_name,
                 t.price_per_day
@@ -191,11 +199,14 @@ router.get('/cottage/:cottageId', async (req, res) => {
                 b.guest_name,
                 b.phone,
                 b.email,
-                b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
-                b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
+                b.check_in_date,
+                b.check_out_date,
                 b.status,
                 b.created_at,
                 b.guests,
+                b.notes,
+                b.total_cost,
+                b.tariff_id,
                 c.name as cottage_name,
                 t.name as tariff_name,
                 t.price_per_day
@@ -208,23 +219,70 @@ router.get('/cottage/:cottageId', async (req, res) => {
             [req.params.cottageId]
         );
         
-        // Преобразуем даты в московское время и форматируем их
-        const bookings = rows.map(row => ({
-            id: row.id?.toString() || '',
-            cottageId: row.cottage_id?.toString() || '',
-            startDate: row.check_in_date.toISOString().split('T')[0],
-            endDate: row.check_out_date.toISOString().split('T')[0],
-            guests: row.guests || 1,
-            status: row.status || 'pending',
-            guestName: row.guest_name || '',
-            phone: row.phone || '',
-            email: row.email || '',
-            cottageName: row.cottage_name || '',
-            tariff: {
-                name: row.tariff_name || 'Стандартный',
-                pricePerDay: parseFloat(row.price_per_day) || 5000.00
-            }
-        }));
+        console.log('\n=== Raw Database Results ===');
+        console.log('Found bookings:', rows.length);
+        rows.forEach(row => {
+            console.log(`Booking ${row.id}:`);
+            console.log('  Raw check_in_date:', row.check_in_date);
+            console.log('  Raw check_out_date:', row.check_out_date);
+            console.log('  Status:', row.status);
+        });
+        
+        // Преобразуем данные для Flutter, правильно конвертируя UTC в московское время
+        const bookings = rows.map(row => {
+            // Конвертируем UTC даты в московское время
+            const checkInDateUTC = new Date(row.check_in_date);
+            const checkOutDateUTC = new Date(row.check_out_date);
+            
+            // Добавляем 3 часа для московского времени
+            const checkInDateMoscow = new Date(checkInDateUTC.getTime() + 3 * 60 * 60 * 1000);
+            const checkOutDateMoscow = new Date(checkOutDateUTC.getTime() + 3 * 60 * 60 * 1000);
+            
+            // Извлекаем только дату в формате YYYY-MM-DD
+            const checkInDateOnly = checkInDateMoscow.toISOString().split('T')[0];
+            const checkOutDateOnly = checkOutDateMoscow.toISOString().split('T')[0];
+            
+            console.log(`Processing booking ${row.id}:`);
+            console.log('  Raw UTC checkInDate:', row.check_in_date);
+            console.log('  Raw UTC checkOutDate:', row.check_out_date);
+            console.log('  Moscow checkInDate:', checkInDateMoscow.toISOString());
+            console.log('  Moscow checkOutDate:', checkOutDateMoscow.toISOString());
+            console.log('  Extracted checkInDateOnly:', checkInDateOnly);
+            console.log('  Extracted checkOutDateOnly:', checkOutDateOnly);
+            
+            return {
+                id: row.id?.toString() || '',
+                cottageId: row.cottage_id?.toString() || '',
+                startDate: checkInDateOnly,
+                endDate: checkOutDateOnly,
+                guests: row.guests || 1,
+                status: row.status || 'booked',
+                guestName: row.guest_name || '',
+                phone: row.phone || '',
+                email: row.email || '',
+                notes: row.notes || '',
+                totalCost: parseFloat(row.total_cost || 0),
+                tariffId: row.tariff_id?.toString() || '1',
+                cottageName: row.cottage_name || '',
+                tariff: {
+                    name: row.tariff_name || 'Стандартный',
+                    pricePerDay: parseFloat(row.price_per_day) || 5000.00
+                }
+            };
+        });
+        
+        console.log('\n=== Final Response ===');
+        bookings.forEach(booking => {
+            console.log(`Booking ${booking.id}:`);
+            console.log('  startDate (date only):', booking.startDate);
+            console.log('  endDate (date only):', booking.endDate);
+            console.log('  status:', booking.status);
+        });
+        console.log('=== Sending to Client ===');
+        console.log('Sending bookings:', bookings.length);
+        bookings.forEach(booking => {
+            console.log(`Booking ${booking.id}: startDate: ${booking.startDate} endDate: ${booking.endDate} status: ${booking.status}`);
+        });
         
         res.json(bookings);
     } catch (err) {
@@ -336,6 +394,7 @@ router.get('/tariffs', async (req, res) => {
     }
 });
 
+// В routes/bookings.js - исправляем секцию создания бронирования
 // Create a new booking with tariff support
 router.post('/', async (req, res) => {
     const client = await pool.connect();
@@ -344,7 +403,6 @@ router.post('/', async (req, res) => {
         
         console.log('\n=== BOOKING CREATION REQUEST ===');
         console.log('Raw request body:', req.body);
-        console.log('Content-Type:', req.get('Content-Type'));
         
         const { 
             startDate, 
@@ -358,17 +416,6 @@ router.post('/', async (req, res) => {
             notes = ''
         } = req.body;
 
-        console.log('\nExtracted fields:');
-        console.log('startDate:', startDate);
-        console.log('endDate:', endDate);
-        console.log('guests:', guests);
-        console.log('cottageId:', cottageId);
-        console.log('guestName:', guestName);
-        console.log('phone:', phone);
-        console.log('email:', email);
-        console.log('tariffId:', tariffId);
-        console.log('notes:', notes);
-        
         // Validate required fields
         if (!startDate || !endDate || !cottageId || !guestName || !phone) {
             const missingFields = [];
@@ -378,19 +425,29 @@ router.post('/', async (req, res) => {
             if (!guestName) missingFields.push('ФИО гостя');
             if (!phone) missingFields.push('телефон');
             
-            console.log('Missing fields:', missingFields);
-            
             return res.status(400).json({ 
                 message: `Не заполнены обязательные поля: ${missingFields.join(', ')}` 
             });
         }
 
-        // Parse and validate dates
+        // Parse dates - ожидаем ISO строки или даты в формате YYYY-MM-DD
         let parsedStartDate, parsedEndDate;
         try {
-            // Convert dates to Moscow time
-            parsedStartDate = new Date(startDate + 'T14:00:00.000+03:00');
-            parsedEndDate = new Date(endDate + 'T12:00:00.000+03:00');
+            if (startDate.includes('T')) {
+                // Если это уже ISO строка с временем
+                parsedStartDate = new Date(startDate);
+            } else {
+                // Если это дата в формате YYYY-MM-DD, добавляем время заезда (14:00 МСК)
+                parsedStartDate = new Date(startDate + 'T14:00:00.000+03:00');
+            }
+            
+            if (endDate.includes('T')) {
+                // Если это уже ISO строка с временем
+                parsedEndDate = new Date(endDate);
+            } else {
+                // Если это дата в формате YYYY-MM-DD, добавляем время выезда (12:00 МСК)
+                parsedEndDate = new Date(endDate + 'T12:00:00.000+03:00');
+            }
             
             if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
                 throw new Error('Invalid date format');
@@ -402,7 +459,7 @@ router.post('/', async (req, res) => {
         } catch (error) {
             console.error('Date parsing error:', error);
             return res.status(400).json({
-                message: 'Неверный формат даты. Пожалуйста, используйте формат ISO 8601 (например, 2025-06-03)'
+                message: 'Неверный формат даты. Пожалуйста, используйте формат ISO 8601 или YYYY-MM-DD'
             });
         }
 
@@ -428,22 +485,6 @@ router.post('/', async (req, res) => {
         const days = Math.ceil((parsedEndDate - parsedStartDate) / (1000 * 60 * 60 * 24));
         const totalCost = pricePerDay * days;
 
-        console.log('\nInserting booking into database:');
-        const params = [
-            cottageId, 
-            guestName.trim(), 
-            phone.trim(), 
-            email?.trim() || null, 
-            parsedStartDate.toISOString(), 
-            parsedEndDate.toISOString(), 
-            guests || 1, 
-            'booked', 
-            numericTariffId,
-            totalCost,
-            notes.trim()
-        ];
-        console.log('SQL Parameters:', params);
-
         const { rows } = await client.query(
             `INSERT INTO lesbaza.bookings 
             (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, created_at) 
@@ -454,29 +495,47 @@ router.post('/', async (req, res) => {
                 guest_name,
                 phone,
                 email,
-                check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
-                check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
+                check_in_date,
+                check_out_date,
                 status,
                 guests,
                 created_at,
                 notes,
                 total_cost,
                 tariff_id`,
-            params
+            [
+                cottageId, 
+                guestName.trim(), 
+                phone.trim(), 
+                email?.trim() || null, 
+                parsedStartDate.toISOString(), 
+                parsedEndDate.toISOString(), 
+                guests || 1, 
+                'booked', 
+                numericTariffId,
+                totalCost,
+                notes.trim()
+            ]
         );
 
         await client.query('COMMIT');
 
         // Очищаем кэш
         bookingsCache.del(`cottage_${cottageId}`);
-        bookingsCache.del(`cottage_${cottageId}_date_${parsedStartDate.toISOString()}`);
 
-        // Преобразуем даты в московское время и форматируем их
+        // Возвращаем бронирование с датами в московском времени в формате YYYY-MM-DD
+        const checkInDateUTC = new Date(rows[0].check_in_date);
+        const checkOutDateUTC = new Date(rows[0].check_out_date);
+        
+        // Конвертируем в московское время (+3 часа)
+        const checkInDateMoscow = new Date(checkInDateUTC.getTime() + 3 * 60 * 60 * 1000);
+        const checkOutDateMoscow = new Date(checkOutDateUTC.getTime() + 3 * 60 * 60 * 1000);
+        
         const booking = {
             id: rows[0].id?.toString() || '',
             cottageId: rows[0].cottage_id?.toString() || '',
-            startDate: rows[0].check_in_date.toISOString().split('T')[0],
-            endDate: rows[0].check_out_date.toISOString().split('T')[0],
+            startDate: checkInDateMoscow.toISOString().split('T')[0],
+            endDate: checkOutDateMoscow.toISOString().split('T')[0],
             guests: rows[0].guests || 1,
             status: rows[0].status || 'booked',
             guestName: rows[0].guest_name || '',
@@ -500,7 +559,210 @@ router.post('/', async (req, res) => {
 
 // Get a specific booking
 router.get('/:id', async (req, res) => {
-    console.log(`GET /api/bookings/${req.params.id} - Fetching booking details`);
+    try {
+        const { rows } = await pool.query(
+            `SELECT 
+                b.booking_id as id,
+                b.cottage_id,
+                b.guest_name,
+                b.phone,
+                b.email,
+                b.check_in_date,
+                b.check_out_date,
+                b.status,
+                b.created_at,
+                b.guests,
+                c.name as cottage_name,
+                t.name as tariff_name,
+                t.price_per_day
+            FROM lesbaza.bookings b 
+            JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
+            LEFT JOIN lesbaza.tariffs t ON b.tariff_id = t.tariff_id
+            WHERE b.booking_id = $1`,
+            [req.params.id]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Booking not found' });
+        }
+        
+        // Преобразуем данные для Flutter
+        const booking = {
+            id: rows[0].id?.toString() || '',
+            cottageId: rows[0].cottage_id?.toString() || '',
+            guestName: rows[0].guest_name || '',
+            phone: rows[0].phone || '',
+            email: rows[0].email || '',
+            startDate: rows[0].check_in_date,
+            endDate: rows[0].check_out_date,
+            status: rows[0].status || 'pending',
+            guests: rows[0].guests || 1,
+            cottageName: rows[0].cottage_name || '',
+            tariff: {
+                name: rows[0].tariff_name || 'Стандартный',
+                pricePerDay: parseFloat(rows[0].price_per_day) || 5000.00
+            }
+        };
+        
+        res.json(booking);
+    } catch (err) {
+        console.error('Error fetching booking:', err);
+        res.status(500).json({ message: 'Error fetching booking', error: err.message });
+    }
+});
+
+// Update booking status (check-in, check-out)
+router.put('/:id/status', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const bookingId = req.params.id;
+        const { status } = req.body;
+
+        // Проверяем, что статус допустимый
+        const validStatuses = ['booked', 'checked_in', 'checked_out', 'cancelled'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ 
+                message: 'Недопустимый статус. Допустимые значения: ' + validStatuses.join(', ') 
+            });
+        }
+
+        // Получаем текущий статус бронирования
+        const { rows: currentBooking } = await client.query(
+            'SELECT status FROM lesbaza.bookings WHERE booking_id = $1',
+            [bookingId]
+        );
+
+        if (currentBooking.length === 0) {
+            return res.status(404).json({ message: 'Бронирование не найдено' });
+        }
+
+        // Обновляем статус
+        const { rows } = await client.query(
+            `UPDATE lesbaza.bookings 
+            SET status = CAST($1 AS VARCHAR)
+            WHERE booking_id = $2
+            RETURNING 
+                booking_id as id,
+                cottage_id,
+                guest_name,
+                phone,
+                email,
+                check_in_date as "startDate",
+                check_out_date as "endDate",
+                status,
+                guests,
+                created_at,
+                notes,
+                total_cost,
+                tariff_id`,
+            [status, bookingId]
+        );
+
+        await client.query('COMMIT');
+
+        // Очищаем кэш для этого домика
+        invalidateCache(rows[0].cottage_id);
+
+        // Возвращаем обновленное бронирование
+        const booking = {
+            id: rows[0].id?.toString() || '',
+            cottageId: rows[0].cottage_id?.toString() || '',
+            startDate: rows[0].startDate,
+            endDate: rows[0].endDate,
+            guests: rows[0].guests || 1,
+            status: rows[0].status,
+            guestName: rows[0].guest_name || '',
+            phone: rows[0].phone || '',
+            email: rows[0].email || '',
+            notes: rows[0].notes || '',
+            totalCost: rows[0].total_cost || 0,
+            tariffId: rows[0].tariff_id
+        };
+        
+        res.json(booking);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error updating booking status:', err);
+        res.status(500).json({ 
+            message: 'Ошибка при обновлении статуса бронирования', 
+            error: err.message 
+        });
+    } finally {
+        client.release();
+    }
+});
+
+// DELETE /api/bookings/:id/checkout - завершить бронирование и удалить запись
+router.delete('/:id/checkout', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const bookingId = req.params.id;
+
+        // Delete the booking
+        await client.query(
+            'DELETE FROM lesbaza.bookings WHERE booking_id = $1',
+            [bookingId]
+        );
+
+        await client.query('COMMIT');
+        invalidateCache();
+        res.json({ message: 'Booking completed and removed successfully' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error completing booking:', err);
+        res.status(500).json({ message: 'Error completing booking', error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+router.delete('/tariffs/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Проверяем, используется ли тариф в бронированиях
+        const { rows: bookings } = await client.query(
+            'SELECT COUNT(*) as count FROM lesbaza.bookings WHERE tariff_id = $1',
+            [req.params.id]
+        );
+
+        if (bookings[0].count > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ 
+                message: 'Невозможно удалить тариф, так как он используется в существующих бронированиях. Сначала измените тариф в этих бронированиях.' 
+            });
+        }
+
+        const { rowCount } = await client.query(
+            'DELETE FROM lesbaza.tariffs WHERE tariff_id = $1',
+            [req.params.id]
+        );
+
+        if (rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Тариф не найден' });
+        }
+
+        await client.query('COMMIT');
+        res.status(204).send();
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error deleting tariff:', err);
+        res.status(500).json({ message: 'Ошибка при удалении тарифа', error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+module.exports = router;
+
+// Get a specific booking
+router.get('/:id', async (req, res) => {
     try {
         const { rows } = await pool.query(
             `SELECT 
@@ -643,10 +905,6 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
         console.log(`\n=== GET /api/bookings/cottage/${req.params.cottageId}/date/${req.params.date} ===`);
         console.log('Request date:', req.params.date);
         
-        // Convert incoming date to UTC for database comparison
-        const utcDate = new Date(req.params.date);
-        console.log('UTC date:', utcDate.toISOString());
-        
         const { rows } = await pool.query(
             `SELECT 
                 b.booking_id as id,
@@ -654,17 +912,23 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
                 b.guest_name,
                 b.phone,
                 b.email,
-                b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_in_date,
-                b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow' as check_out_date,
+                b.check_in_date,
+                b.check_out_date,
                 b.status,
                 b.created_at,
+                b.guests,
+                b.notes,
+                b.total_cost,
+                b.prepayment,
+                b.total_paid,
+                b.tariff_id,
                 c.name as cottage_name 
             FROM lesbaza.bookings b 
             JOIN lesbaza.cottages c ON b.cottage_id = c.cottage_id 
             WHERE b.cottage_id = $1 
             AND b.status != 'cancelled'
-            AND DATE($2::timestamp AT TIME ZONE 'Europe/Moscow') >= DATE(b.check_in_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')
-            AND DATE($2::timestamp AT TIME ZONE 'Europe/Moscow') < DATE(b.check_out_date AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Moscow')
+            AND DATE($2) >= DATE(b.check_in_date)
+            AND DATE($2) < DATE(b.check_out_date)
             ORDER BY b.check_in_date DESC`,
             [req.params.cottageId, req.params.date]
         );
@@ -678,25 +942,33 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             console.log('  status:', row.status);
         });
         
-        // Преобразуем даты в московское время и форматируем их
+        // Преобразуем данные, правильно конвертируя UTC в московское время
         const bookings = rows.map(row => {
-            const checkInDate = new Date(row.check_in_date);
-            const checkOutDate = new Date(row.check_out_date);
+            // Конвертируем UTC даты в московское время
+            const checkInDateUTC = new Date(row.check_in_date);
+            const checkOutDateUTC = new Date(row.check_out_date);
             
-            // Сдвигаем даты на 1 день вперед
-            checkInDate.setDate(checkInDate.getDate() + 1);
-            checkOutDate.setDate(checkOutDate.getDate() + 1);
+            // Добавляем 3 часа для московского времени
+            const checkInDateMoscow = new Date(checkInDateUTC.getTime() + 3 * 60 * 60 * 1000);
+            const checkOutDateMoscow = new Date(checkOutDateUTC.getTime() + 3 * 60 * 60 * 1000);
+            
+            // Извлекаем только дату в формате YYYY-MM-DD
+            const checkInDateOnly = checkInDateMoscow.toISOString().split('T')[0];
+            const checkOutDateOnly = checkOutDateMoscow.toISOString().split('T')[0];
             
             return {
                 id: row.id?.toString() || '',
                 cottageId: row.cottage_id?.toString() || '',
-                startDate: checkInDate.toISOString().split('T')[0],
-                endDate: checkOutDate.toISOString().split('T')[0],
+                startDate: checkInDateOnly,
+                endDate: checkOutDateOnly,
                 guests: row.guests || 1,
                 status: row.status || 'booked',
                 guestName: row.guest_name || '',
                 phone: row.phone || '',
                 email: row.email || '',
+                notes: row.notes || '',
+                totalCost: parseFloat(row.total_cost || 0),
+                tariffId: row.tariff_id?.toString() || '1',
                 cottageName: row.cottage_name || ''
             };
         });
@@ -799,37 +1071,6 @@ router.put('/:id/status', async (req, res) => {
     }
 });
 
-// POST /api/bookings/tariffs - создать новый тариф
-router.post('/tariffs', async (req, res) => {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-
-        const { name, pricePerDay } = req.body;
-        const { rows } = await client.query(
-            `INSERT INTO lesbaza.tariffs (name, price_per_day)
-            VALUES ($1, $2)
-            RETURNING tariff_id`,
-            [name, pricePerDay]
-        );
-
-        await client.query('COMMIT');
-
-        res.status(201).json({
-            id: rows[0].tariff_id.toString(),
-            name,
-            pricePerDay
-        });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Error creating tariff:', err);
-        res.status(500).json({ message: 'Error creating tariff', error: err.message });
-    } finally {
-        client.release();
-    }
-});
-
-// PUT /api/bookings/tariffs/:id - обновить тариф
 router.put('/tariffs/:id', async (req, res) => {
     const client = await pool.connect();
     try {
@@ -900,6 +1141,32 @@ router.delete('/tariffs/:id', async (req, res) => {
         await client.query('ROLLBACK');
         console.error('Error deleting tariff:', err);
         res.status(500).json({ message: 'Ошибка при удалении тарифа', error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// DELETE /api/bookings/:id/checkout - завершить бронирование и удалить запись
+router.delete('/:id/checkout', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const bookingId = req.params.id;
+
+        // Delete the booking
+        await client.query(
+            'DELETE FROM lesbaza.bookings WHERE booking_id = $1',
+            [bookingId]
+        );
+
+        await client.query('COMMIT');
+        invalidateCache();
+        res.json({ message: 'Booking completed and removed successfully' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error completing booking:', err);
+        res.status(500).json({ message: 'Error completing booking', error: err.message });
     } finally {
         client.release();
     }

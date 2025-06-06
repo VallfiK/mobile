@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../widgets/calendar_view.dart';
 import '../models/cottage.dart';
 import '../models/booking.dart';
 import '../services/cottage_service.dart';
-import '../services/booking_service.dart';
 import '../widgets/calendar_view.dart';
 import '../widgets/booking_filters.dart';
 import '../widgets/booking_form_dialog.dart';
+import '../widgets/booking_dialog.dart';
+import '../widgets/booking_cancellation_dialog.dart';
+import '../widgets/price_info.dart';
+import '../widgets/availability_calendar.dart';
+import 'package:intl/intl.dart';
 
 class CottageDetailScreen extends StatefulWidget {
   final String cottageId;

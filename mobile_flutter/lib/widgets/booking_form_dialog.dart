@@ -35,8 +35,10 @@ class _BookingFormDialogState extends State<BookingFormDialog> {
   List<Tariff> _tariffs = [];
   bool _isLoading = false;
   double _totalCost = 0;
-  double _requiredDeposit = 0;
+  double _depositAmount = 0;
   double _remainingPayment = 0;
+  bool _useCustomDeposit = false;
+  double? _selectedDepositPercentage;
 
   @override
   void initState() {
@@ -84,10 +86,19 @@ class _BookingFormDialogState extends State<BookingFormDialog> {
     final days = _checkOutDate.difference(_checkInDate).inDays;
     final totalCost = selectedTariff.pricePerDay * days;
     
+    double depositAmount = 0;
+    if (_useCustomDeposit) {
+      depositAmount = _depositAmount;
+    } else if (_selectedDepositPercentage != null) {
+      depositAmount = totalCost * (_selectedDepositPercentage! / 100);
+    } else {
+      depositAmount = totalCost * 0.3; // Default 30%
+    }
+
     setState(() {
       _totalCost = totalCost;
-      _requiredDeposit = totalCost * 0.3; // 30% предоплата
-      _remainingPayment = totalCost - _requiredDeposit;
+      _depositAmount = depositAmount;
+      _remainingPayment = totalCost - depositAmount;
     });
   }
 
@@ -266,6 +277,63 @@ class _BookingFormDialogState extends State<BookingFormDialog> {
                   const SizedBox(height: 16),
                 ],
 
+                // Предоплата
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _useCustomDeposit,
+                      onChanged: (bool? value) {
+                        setState(() {
+                          _useCustomDeposit = value ?? false;
+                          _calculateCost();
+                        });
+                      },
+                    ),
+                    const Text('Ввести произвольную сумму предоплаты'),
+                  ],
+                ),
+                if (_useCustomDeposit)
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Сумма предоплаты',
+                      border: OutlineInputBorder(),
+                      prefixText: '₽',
+                    ),
+                    keyboardType: TextInputType.number,
+                    initialValue: _depositAmount.toString(),
+                    onChanged: (value) {
+                      if (value.isNotEmpty) {
+                        setState(() {
+                          _depositAmount = double.parse(value);
+                          _calculateCost();
+                        });
+                      }
+                    },
+                  ),
+                if (!_useCustomDeposit)
+                  DropdownButtonFormField<double>(
+                    decoration: const InputDecoration(
+                      labelText: 'Процент предоплаты',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _selectedDepositPercentage,
+                    items: const [
+                      5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0
+                    ].map((percentage) {
+                      return DropdownMenuItem(
+                        value: percentage,
+                        child: Text('${percentage}%'),
+                      );
+                    }).toList(),
+                    onChanged: (double? value) {
+                      setState(() {
+                        _selectedDepositPercentage = value;
+                        _calculateCost();
+                      });
+                    },
+                  ),
+                const SizedBox(height: 16),
+
                 // Стоимость
                 Card(
                   child: Padding(
@@ -279,8 +347,8 @@ class _BookingFormDialogState extends State<BookingFormDialog> {
                         ),
                         const SizedBox(height: 8),
                         Text('Общая стоимость: ${currencyFormat.format(_totalCost)}'),
-                        Text('Предоплата (30%): ${currencyFormat.format(_requiredDeposit)}'),
-                        Text('Остаток к оплате: ${currencyFormat.format(_remainingPayment)}'),
+                        Text('Сумма предоплаты: ${currencyFormat.format(_depositAmount)}'),
+                        Text('Оставшаяся сумма: ${currencyFormat.format(_remainingPayment)}'),
                         const SizedBox(height: 8),
                         Text(
                           'Заезд: 14:00, Выезд: 12:00',

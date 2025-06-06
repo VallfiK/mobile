@@ -168,6 +168,20 @@ class BookingService {
     }
   }
 
+  Future<void> checkoutBooking(String bookingId) async {
+    try {
+      print('Completing booking: $bookingId');
+      final response = await _apiClient.delete('/bookings/$bookingId/checkout');
+      
+      if (response.statusCode != 200) {
+        throw Exception('Failed to complete booking: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error in checkoutBooking: $e');
+      rethrow;
+    }
+  }
+
   Future<Booking> updateBookingStatus(String bookingId, String status) async {
     try {
       print('Updating booking status: $bookingId to $status');
