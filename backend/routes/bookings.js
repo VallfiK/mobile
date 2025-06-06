@@ -206,6 +206,8 @@ router.get('/cottage/:cottageId', async (req, res) => {
                 b.guests,
                 b.notes,
                 b.total_cost,
+                b.prepayment,
+                b.total_paid,
                 b.tariff_id,
                 c.name as cottage_name,
                 t.name as tariff_name,
@@ -226,6 +228,9 @@ router.get('/cottage/:cottageId', async (req, res) => {
             console.log('  Raw check_in_date:', row.check_in_date);
             console.log('  Raw check_out_date:', row.check_out_date);
             console.log('  Status:', row.status);
+            console.log('  Total cost:', row.total_cost);
+            console.log('  Prepayment:', row.prepayment);
+            console.log('  Total paid:', row.total_paid);
         });
         
         // Преобразуем данные для Flutter, правильно конвертируя UTC в московское время
@@ -242,6 +247,12 @@ router.get('/cottage/:cottageId', async (req, res) => {
             const checkInDateOnly = checkInDateMoscow.toISOString().split('T')[0];
             const checkOutDateOnly = checkOutDateMoscow.toISOString().split('T')[0];
             
+            // Рассчитываем суммы
+            const totalCost = parseFloat(row.total_cost || 0);
+            const prepayment = parseFloat(row.prepayment || 0);
+            const totalPaid = parseFloat(row.total_paid || 0);
+            const remainingAmount = totalCost - totalPaid;
+            
             console.log(`Processing booking ${row.id}:`);
             console.log('  Raw UTC checkInDate:', row.check_in_date);
             console.log('  Raw UTC checkOutDate:', row.check_out_date);
@@ -249,6 +260,7 @@ router.get('/cottage/:cottageId', async (req, res) => {
             console.log('  Moscow checkOutDate:', checkOutDateMoscow.toISOString());
             console.log('  Extracted checkInDateOnly:', checkInDateOnly);
             console.log('  Extracted checkOutDateOnly:', checkOutDateOnly);
+            console.log('  Payment info - Total:', totalCost, 'Prepayment:', prepayment, 'Total paid:', totalPaid, 'Remaining:', remainingAmount);
             
             return {
                 id: row.id?.toString() || '',
@@ -261,7 +273,10 @@ router.get('/cottage/:cottageId', async (req, res) => {
                 phone: row.phone || '',
                 email: row.email || '',
                 notes: row.notes || '',
-                totalCost: parseFloat(row.total_cost || 0),
+                totalCost: totalCost,
+                prepayment: prepayment,
+                totalPaid: totalPaid,
+                remainingAmount: remainingAmount,
                 tariffId: row.tariff_id?.toString() || '1',
                 cottageName: row.cottage_name || '',
                 tariff: {
@@ -277,12 +292,13 @@ router.get('/cottage/:cottageId', async (req, res) => {
             console.log('  startDate (date only):', booking.startDate);
             console.log('  endDate (date only):', booking.endDate);
             console.log('  status:', booking.status);
+            console.log('  totalCost:', booking.totalCost);
+            console.log('  prepayment:', booking.prepayment);
+            console.log('  totalPaid:', booking.totalPaid);
+            console.log('  remainingAmount:', booking.remainingAmount);
         });
         console.log('=== Sending to Client ===');
         console.log('Sending bookings:', bookings.length);
-        bookings.forEach(booking => {
-            console.log(`Booking ${booking.id}: startDate: ${booking.startDate} endDate: ${booking.endDate} status: ${booking.status}`);
-        });
         
         res.json(bookings);
     } catch (err) {
@@ -413,8 +429,11 @@ router.post('/', async (req, res) => {
             phone, 
             email, 
             tariffId,
+            prepayment = 0,
             notes = ''
-        } = req.body;
+        } = req.body; 
+        
+        console.log('Prepayment from request:', prepayment);
 
         // Validate required fields
         if (!startDate || !endDate || !cottageId || !guestName || !phone) {
@@ -487,8 +506,8 @@ router.post('/', async (req, res) => {
 
         const { rows } = await client.query(
             `INSERT INTO lesbaza.bookings 
-            (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, created_at) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP) 
+            (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, prepayment, created_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP) 
             RETURNING 
                 booking_id as id,
                 cottage_id,
@@ -502,7 +521,8 @@ router.post('/', async (req, res) => {
                 created_at,
                 notes,
                 total_cost,
-                tariff_id`,
+                tariff_id,
+                prepayment`,
             [
                 cottageId, 
                 guestName.trim(), 
@@ -514,9 +534,12 @@ router.post('/', async (req, res) => {
                 'booked', 
                 numericTariffId,
                 totalCost,
-                notes.trim()
+                notes.trim(),
+                parseFloat(prepayment) || 0
             ]
         );
+        
+        console.log('Booking created with prepayment:', rows[0].prepayment);
 
         await client.query('COMMIT');
 
@@ -543,9 +566,11 @@ router.post('/', async (req, res) => {
             email: rows[0].email || '',
             notes: rows[0].notes || '',
             totalCost: rows[0].total_cost || 0,
+            prepayment: parseFloat(rows[0].prepayment) || 0,
             tariffId: rows[0].tariff_id?.toString() || ''
         };
 
+        console.log('Returning booking with prepayment:', booking.prepayment);
         console.log('\nBooking created successfully:', booking);
         res.status(201).json(booking);
     } catch (err) {
@@ -940,6 +965,9 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             console.log('  check_in_date:', row.check_in_date);
             console.log('  check_out_date:', row.check_out_date);
             console.log('  status:', row.status);
+            console.log('  total_cost:', row.total_cost);
+            console.log('  prepayment:', row.prepayment);
+            console.log('  total_paid:', row.total_paid);
         });
         
         // Преобразуем данные, правильно конвертируя UTC в московское время
@@ -956,6 +984,12 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             const checkInDateOnly = checkInDateMoscow.toISOString().split('T')[0];
             const checkOutDateOnly = checkOutDateMoscow.toISOString().split('T')[0];
             
+            // Рассчитываем суммы
+            const totalCost = parseFloat(row.total_cost || 0);
+            const prepayment = parseFloat(row.prepayment || 0);
+            const totalPaid = parseFloat(row.total_paid || 0);
+            const remainingAmount = totalCost - totalPaid;
+            
             return {
                 id: row.id?.toString() || '',
                 cottageId: row.cottage_id?.toString() || '',
@@ -967,7 +1001,10 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
                 phone: row.phone || '',
                 email: row.email || '',
                 notes: row.notes || '',
-                totalCost: parseFloat(row.total_cost || 0),
+                totalCost: totalCost,
+                prepayment: prepayment,
+                totalPaid: totalPaid,
+                remainingAmount: remainingAmount,
                 tariffId: row.tariff_id?.toString() || '1',
                 cottageName: row.cottage_name || ''
             };
@@ -979,6 +1016,12 @@ router.get('/cottage/:cottageId/date/:date', async (req, res) => {
             console.log('  startDate:', booking.startDate);
             console.log('  endDate:', booking.endDate);
             console.log('  status:', booking.status);
+            console.log('  payment info:', {
+                totalCost: booking.totalCost,
+                prepayment: booking.prepayment,
+                totalPaid: booking.totalPaid,
+                remainingAmount: booking.remainingAmount
+            });
         });
         
         res.json(bookings);

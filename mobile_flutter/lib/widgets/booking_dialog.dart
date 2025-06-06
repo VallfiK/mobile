@@ -36,6 +36,7 @@ class _BookingDialogState extends State<BookingDialog> {
   double _totalCost = 0;
   double _requiredDeposit = 0;
   double _remainingPayment = 0;
+  final _prepaymentController = TextEditingController();
 
   @override
   void initState() {
@@ -113,6 +114,8 @@ class _BookingDialogState extends State<BookingDialog> {
       _totalCost = total;
       _requiredDeposit = deposit;
       _remainingPayment = remainingPayment;
+      // Устанавливаем значение предоплаты в контроллер
+      _prepaymentController.text = deposit.toStringAsFixed(2);
     });
   }
 
@@ -122,6 +125,7 @@ class _BookingDialogState extends State<BookingDialog> {
     _phoneController.dispose();
     _emailController.dispose();
     _notesController.dispose();
+    _prepaymentController.dispose();
     super.dispose();
   }
 
@@ -150,6 +154,7 @@ class _BookingDialogState extends State<BookingDialog> {
         email: _emailController.text,
         notes: _notesController.text,
         totalCost: _totalCost,
+        prepayment: double.tryParse(_prepaymentController.text.replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '.')) ?? 0.0,
         tariffId: selectedTariff.id.toString(),
       );
 
@@ -370,6 +375,25 @@ class _BookingDialogState extends State<BookingDialog> {
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 3,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _prepaymentController,
+                    decoration: const InputDecoration(
+                      labelText: 'Предоплата',
+                      hintText: 'Введите сумму предоплаты',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    onChanged: (value) {
+                      // Обновляем оставшуюся сумму при изменении предоплаты
+                      if (value.isNotEmpty) {
+                        final prepayment = double.tryParse(value) ?? 0.0;
+                        setState(() {
+                          _remainingPayment = _totalCost - prepayment;
+                        });
+                      }
+                    },
                   ),
                   const SizedBox(height: 24),
                   Row(

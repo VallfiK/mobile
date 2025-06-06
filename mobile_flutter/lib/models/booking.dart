@@ -1,3 +1,4 @@
+// Обновленный файл lib/models/booking.dart
 import 'package:intl/intl.dart';
 
 class Booking {
@@ -12,6 +13,9 @@ class Booking {
   final String email;
   final String notes;
   final double totalCost;
+  final double prepayment;
+  final double totalPaid;
+  final double remainingAmount;
   final String tariffId;
 
   Booking({
@@ -26,6 +30,9 @@ class Booking {
     required this.email,
     this.notes = '',
     this.totalCost = 0,
+    this.prepayment = 0,
+    this.totalPaid = 0,
+    this.remainingAmount = 0,
     required this.tariffId,
   });
 
@@ -68,9 +75,33 @@ class Booking {
     final startDate = parseDate(startDateValue);
     final endDate = parseDate(endDateValue);
     
+    // Парсим финансовые поля
+    final totalCost = json['total_cost'] != null 
+        ? double.tryParse(json['total_cost'].toString()) ?? 0.0 
+        : json['totalCost'] != null
+            ? double.tryParse(json['totalCost'].toString()) ?? 0.0
+            : 0.0;
+
+    final prepayment = json['prepayment'] != null 
+        ? double.tryParse(json['prepayment'].toString()) ?? 0.0 
+        : 0.0;
+
+    final totalPaid = json['total_paid'] != null 
+        ? double.tryParse(json['total_paid'].toString()) ?? 0.0 
+        : json['totalPaid'] != null
+            ? double.tryParse(json['totalPaid'].toString()) ?? 0.0
+            : 0.0;
+
+    final remainingAmount = json['remaining_amount'] != null 
+        ? double.tryParse(json['remaining_amount'].toString()) ?? 0.0 
+        : json['remainingAmount'] != null
+            ? double.tryParse(json['remainingAmount'].toString()) ?? 0.0
+            : totalCost - totalPaid;
+    
     print('Booking.fromJson - ID: $id');
     print('  Raw startDate: $startDateValue -> Parsed: $startDate');
     print('  Raw endDate: $endDateValue -> Parsed: $endDate');
+    print('  Payment info: totalCost=$totalCost, prepayment=$prepayment, totalPaid=$totalPaid, remaining=$remainingAmount');
     
     return Booking(
       id: id,
@@ -83,11 +114,10 @@ class Booking {
       phone: json['phone']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       notes: json['notes']?.toString() ?? '',
-      totalCost: json['total_cost'] != null 
-          ? double.tryParse(json['total_cost'].toString()) ?? 0.0 
-          : json['totalCost'] != null
-              ? double.tryParse(json['totalCost'].toString()) ?? 0.0
-              : 0.0,
+      totalCost: totalCost,
+      prepayment: prepayment,
+      totalPaid: totalPaid,
+      remainingAmount: remainingAmount,
       tariffId: json['tariff_id']?.toString() ?? json['tariffId']?.toString() ?? '1',
     );
   }
@@ -105,6 +135,9 @@ class Booking {
       'notes': notes,
       'tariffId': tariffId,
       'totalCost': totalCost,
+      'prepayment': prepayment,
+      'totalPaid': totalPaid,
+      'remainingAmount': remainingAmount,
     };
   }
 
@@ -120,6 +153,9 @@ class Booking {
     String? email,
     String? notes,
     double? totalCost,
+    double? prepayment,
+    double? totalPaid,
+    double? remainingAmount,
     String? tariffId,
   }) {
     return Booking(
@@ -134,7 +170,18 @@ class Booking {
       email: email ?? this.email,
       notes: notes ?? this.notes,
       totalCost: totalCost ?? this.totalCost,
+      prepayment: prepayment ?? this.prepayment,
+      totalPaid: totalPaid ?? this.totalPaid,
+      remainingAmount: remainingAmount ?? this.remainingAmount,
       tariffId: tariffId ?? this.tariffId,
     );
   }
+
+  // Вспомогательные методы для работы с платежами
+  bool get isFullyPaid => remainingAmount <= 0;
+  bool get hasDeposit => prepayment > 0;
+  double get unpaidAmount => totalCost - totalPaid;
+  
+  // Процент оплаченной суммы
+  double get paidPercentage => totalCost > 0 ? (totalPaid / totalCost) * 100 : 0;
 }

@@ -101,9 +101,14 @@ class BookingService {
       print('Check-out date: "${booking.endDate.toIso8601String()}"');
       print('Guests count: ${booking.guests}');
       print('Total Cost: ${booking.totalCost}');
+      print('Prepayment: ${booking.prepayment}');
       print('Tariff ID: "${booking.tariffId}" (${booking.tariffId.isEmpty ? 'ПУСТО!' : 'OK'})');
 
       final requestBody = booking.toJson();
+      // Добавляем prepayment в запрос, если он не null
+      if (booking.prepayment != null) {
+        requestBody['prepayment'] = booking.prepayment;
+      }
       print('\nЗапрос на сервер (JSON):');
       final prettyJson = const JsonEncoder.withIndent('  ').convert(requestBody);
       print(prettyJson);
@@ -277,4 +282,7 @@ class BookingService {
       throw Exception('Ошибка при удалении тарифа: $e');
     }
   }
+  
 }
+
+
