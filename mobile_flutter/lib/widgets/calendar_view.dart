@@ -464,28 +464,36 @@ class _CalendarViewState extends State<CalendarView> {
 
   void _handleDateSelection(DateTime date) {
     if (_isCreatingBooking) return; // Предотвращаем создание при активном процессе
-    
+
     if (_debounceTimer?.isActive ?? false) {
       _debounceTimer!.cancel();
     }
 
     _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
       final cacheKey = _getCacheKey(date);
-      final isAvailable = _dateAvailabilityCache[cacheKey] ?? 
-        await _checkDateAvailability(date);
+      final isAvailable = _dateAvailabilityCache[cacheKey] ?? await _checkDateAvailability(date);
 
       if (!mounted) return;
 
+      // Получаем статус дня (есть ли выезд)
+      final (hasCheckIn, hasCheckOut, status) = _getDayStatus(date);
+
+      // Обновляем выбранный день и брони
       if (_selectedDay != date) {
         setState(() => _selectedDay = date);
-        
         if (widget.onDateSelected != null) {
           final bookings = await widget.onDateSelected!(date);
           setState(() => _groupedBookings[date] = bookings);
         }
       }
 
-      // Если дата доступна и компонент смонтирован, показываем диалог бронирования
+      // Если это день с выездом — просто показываем инфо, не открываем форму
+      if (hasCheckOut) {
+        // ничего не делаем (форма не открывается)
+        return;
+      }
+
+      // В обычные дни — открываем форму
       if (isAvailable && mounted) {
         await _showBookingDialog(date);
       }
@@ -494,6 +502,7 @@ class _CalendarViewState extends State<CalendarView> {
 
   Future<void> _showBookingDialog(DateTime date) async {
     if (_isCreatingBooking) return; // Предотвращаем создание при активном процессе
+
     
     setState(() => _isCreatingBooking = true);
     
@@ -718,7 +727,14 @@ class _CalendarViewState extends State<CalendarView> {
                                     });
 
                                     try {
-                                      await _showBookingDialog(_selectedDay!);
+                                      // Для выезда — создаём бронирование с заездом на 14:00
+DateTime checkInAt14 = DateTime(
+  _selectedDay!.year,
+  _selectedDay!.month,
+  _selectedDay!.day,
+  14, 0, 0,
+);
+await _showBookingDialog(checkInAt14);
                                     } catch (e) {
                                       print('Error showing booking dialog: $e');
                                       if (mounted) {

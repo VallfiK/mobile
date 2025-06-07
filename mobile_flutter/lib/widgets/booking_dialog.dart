@@ -43,8 +43,25 @@ class _BookingDialogState extends State<BookingDialog> {
   @override
   void initState() {
     super.initState();
-    // Устанавливаем дату выезда на следующий день по умолчанию
-    _endDate = widget.selectedDate.add(const Duration(days: 1));
+    // Сохраняем время заезда, если оно есть (например, 14:00)
+    final checkInDate = widget.selectedDate;
+    // По умолчанию выезд на следующий день в 12:00
+    _endDate = DateTime(
+      checkInDate.year,
+      checkInDate.month,
+      checkInDate.day,
+      checkInDate.hour,
+      checkInDate.minute,
+    ).add(const Duration(days: 1));
+    // Если заезд ровно в 14:00, выезд делаем в 12:00 следующего дня
+    if (checkInDate.hour == 14 && checkInDate.minute == 0) {
+      _endDate = DateTime(
+        checkInDate.add(const Duration(days: 1)).year,
+        checkInDate.add(const Duration(days: 1)).month,
+        checkInDate.add(const Duration(days: 1)).day,
+        12, 0,
+      );
+    }
     _loadTariffs();
   }
 
@@ -202,10 +219,10 @@ class _BookingDialogState extends State<BookingDialog> {
       final createdBooking = await widget.bookingService.createBooking(booking);
       // Принудительно обновляем данные с сервера
       await widget.bookingService.refreshBookingsForCottage(widget.cottageId);
-      widget.onBookingCreated(createdBooking);
-      if (mounted) Navigator.of(context).pop();
-
+      
       if (mounted) {
+        Navigator.of(context).pop();
+        
         // Затем вызываем колбэк
         widget.onBookingCreated(createdBooking);
         
@@ -282,232 +299,231 @@ class _BookingDialogState extends State<BookingDialog> {
                     return null;
                   },
                 ),
-                  const SizedBox(height: 16),
-                  
-                  // Телефон
-                  TextFormField(
-                    controller: _phoneController,
-                    decoration: const InputDecoration(
-                      labelText: 'Телефон *',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.phone),
-                    ),
-                    keyboardType: TextInputType.phone,
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Пожалуйста, введите телефон';
-                      }
-                      return null;
-                    },
+                const SizedBox(height: 16),
+                
+                // Телефон
+                TextFormField(
+                  controller: _phoneController,
+                  decoration: const InputDecoration(
+                    labelText: 'Телефон *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.phone),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Email
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
+                  keyboardType: TextInputType.phone,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Пожалуйста, введите телефон';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Email
+                TextFormField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.email),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Дата выезда
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Дата выезда *'),
-                    subtitle: Text(_endDate == null
-                        ? 'Выберите дату выезда'
-                        : '${DateFormat('dd.MM.yyyy').format(_endDate!)} в 12:00'),
-                    trailing: const Icon(Icons.calendar_today),
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _endDate ?? widget.selectedDate.add(const Duration(days: 1)),
-                        firstDate: widget.selectedDate.add(const Duration(days: 1)),
-                        lastDate: widget.selectedDate.add(const Duration(days: 365)),
-                      );
-                      if (picked != null) {
-                        setState(() => _endDate = picked);
-                        _calculateCost();
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Количество гостей
-                  Row(
-                    children: [
-                      const Text('Количество гостей: '),
-                      const SizedBox(width: 16),
-                      DropdownButton<int>(
-                        value: _guests,
-                        items: List.generate(10, (index) => index + 1)
-                            .map((count) => DropdownMenuItem(
-                                  value: count,
-                                  child: Text(count.toString()),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _guests = value);
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Тариф
-                  if (_isLoading && _tariffs.isEmpty)
-                    const Center(child: CircularProgressIndicator())
-                  else if (_tariffs.isNotEmpty)
-                    DropdownButtonFormField<int>(
-                      value: _selectedTariffId,
-                      decoration: const InputDecoration(
-                        labelText: 'Тариф *',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: _tariffs
-                          .map((tariff) => DropdownMenuItem(
-                                value: int.tryParse(tariff.id),
-                                child: Text('${tariff.name} - ${currencyFormat.format(tariff.pricePerDay)} в сутки'),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                
+                // Дата выезда
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Дата выезда *'),
+                  subtitle: Text(_endDate == null
+                      ? 'Выберите дату выезда'
+                      : '${DateFormat('dd.MM.yyyy').format(_endDate!)} в 12:00'),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _endDate ?? widget.selectedDate.add(const Duration(days: 1)),
+                      firstDate: widget.selectedDate.add(const Duration(days: 1)),
+                      lastDate: widget.selectedDate.add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setState(() => _endDate = picked);
+                      _calculateCost();
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Количество гостей
+                Row(
+                  children: [
+                    const Text('Количество гостей: '),
+                    const SizedBox(width: 16),
+                    DropdownButton<int>(
+                      value: _guests,
+                      items: List.generate(10, (index) => index + 1)
+                          .map((count) => DropdownMenuItem(
+                                value: count,
+                                child: Text(count.toString()),
                               ))
                           .toList(),
                       onChanged: (value) {
-                        setState(() => _selectedTariffId = value);
-                        _calculateCost();
-                      },
-                      validator: (value) {
-                        if (value == null) {
-                          return 'Пожалуйста, выберите тариф';
+                        if (value != null) {
+                          setState(() => _guests = value);
                         }
-                        return null;
                       },
                     ),
-                  const SizedBox(height: 16),
-                  
-                  // Расчет стоимости
-                  if (_totalCost > 0) ...[
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey[300]!),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Расчет стоимости:',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Общая стоимость: ${currencyFormat.format(_totalCost)}',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          const Divider(),
-                          Text(
-                            'Предоплата (30%): ${currencyFormat.format(_requiredDeposit)}',
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Оплата при заселении: ${currencyFormat.format(_remainingPayment)}',
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: Colors.green,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Заезд: 14:00, Выезд: 12:00',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                   ],
-                  
-                  // Предоплата
-                  TextFormField(
-                    controller: _prepaymentController,
+                ),
+                const SizedBox(height: 16),
+                
+                // Тариф
+                if (_isLoading && _tariffs.isEmpty)
+                  const Center(child: CircularProgressIndicator())
+                else if (_tariffs.isNotEmpty)
+                  DropdownButtonFormField<int>(
+                    value: _selectedTariffId,
                     decoration: const InputDecoration(
-                      labelText: 'Предоплата *',
-                      hintText: 'Введите сумму предоплаты',
+                      labelText: 'Тариф *',
                       border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.attach_money),
                     ),
-                    keyboardType: TextInputType.number,
+                    items: _tariffs
+                        .map((tariff) => DropdownMenuItem(
+                              value: int.tryParse(tariff.id),
+                              child: Text('${tariff.name} - ${currencyFormat.format(tariff.pricePerDay)} в сутки'),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() => _selectedTariffId = value);
+                      _calculateCost();
+                    },
                     validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Пожалуйста, введите сумму предоплаты';
-                      }
-                      final amount = double.tryParse(value.replaceAll(',', '.'));
-                      if (amount == null || amount < 0) {
-                        return 'Введите корректную сумму';
+                      if (value == null) {
+                        return 'Пожалуйста, выберите тариф';
                       }
                       return null;
                     },
-                    onChanged: (value) {
-                      // Обновляем оставшуюся сумму при изменении предоплаты
-                      if (value.isNotEmpty) {
-                        final prepayment = double.tryParse(value.replaceAll(',', '.')) ?? 0.0;
-                        setState(() {
-                          _remainingPayment = _totalCost - prepayment;
-                        });
-                      }
-                    },
+                  ),
+                const SizedBox(height: 16),
+                
+                // Расчет стоимости
+                if (_totalCost > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Расчет стоимости:',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Общая стоимость: ${currencyFormat.format(_totalCost)}',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const Divider(),
+                        Text(
+                          'Предоплата (30%): ${currencyFormat.format(_requiredDeposit)}',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Оплата при заселении: ${currencyFormat.format(_remainingPayment)}',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Заезд: 14:00, Выезд: 12:00',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 16),
-                  
-                  // Примечания
-                  TextFormField(
-                    controller: _notesController,
-                    decoration: const InputDecoration(
-                      labelText: 'Примечания',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.note),
-                    ),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  // Кнопки
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                        child: const Text('Отмена'),
-                      ),
-                      const SizedBox(width: 16),
-                      FilledButton(
-                        onPressed: (_isLoading || _isCreatingBooking) ? null : _createBooking,
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('Создать бронирование'),
-                      ),
-                    ],
-                  ),
                 ],
-              ),
+                
+                // Предоплата
+                TextFormField(
+                  controller: _prepaymentController,
+                  decoration: const InputDecoration(
+                    labelText: 'Предоплата *',
+                    hintText: 'Введите сумму предоплаты',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money),
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Пожалуйста, введите сумму предоплаты';
+                    }
+                    final amount = double.tryParse(value.replaceAll(',', '.'));
+                    if (amount == null || amount < 0) {
+                      return 'Введите корректную сумму';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) {
+                    // Обновляем оставшуюся сумму при изменении предоплаты
+                    if (value.isNotEmpty) {
+                      final prepayment = double.tryParse(value.replaceAll(',', '.')) ?? 0.0;
+                      setState(() {
+                        _remainingPayment = _totalCost - prepayment;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Примечания
+                TextFormField(
+                  controller: _notesController,
+                  decoration: const InputDecoration(
+                    labelText: 'Примечания',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.note),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 24),
+                
+                // Кнопки
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Отмена'),
+                    ),
+                    const SizedBox(width: 16),
+                    FilledButton(
+                      onPressed: (_isLoading || _isCreatingBooking) ? null : _createBooking,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Создать бронирование'),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
