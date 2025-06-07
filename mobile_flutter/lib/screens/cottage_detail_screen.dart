@@ -1,3 +1,4 @@
+import 'dart:async'; // Для StreamSubscription
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/cottage.dart';
@@ -6,7 +7,7 @@ import '../services/cottage_service.dart';
 import '../services/booking_service.dart';
 import '../widgets/calendar_view.dart';
 import '../widgets/booking_filters.dart';
-import '../widgets/booking_form_dialog.dart';
+import '../widgets/booking_dialog.dart';
 
 class CottageDetailScreen extends StatefulWidget {
   final String cottageId;
@@ -21,6 +22,7 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
   late Future<Cottage> _cottageFuture;
   late Future<List<Booking>> _bookingsFuture;
   bool _isLoading = false;
+  bool _isShowingBookingDialog = false; // Добавляем флаг
   List<Booking> _filteredBookings = [];
 
   @override
@@ -30,7 +32,25 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
         .getCottage(widget.cottageId);
     _bookingsFuture = Provider.of<BookingService>(context, listen: false)
         .getBookingsByCottage(widget.cottageId);
+    
+    // Подписываемся на изменения бронирований
+    final bookingService = Provider.of<BookingService>(context, listen: false);
+    _bookingsSubscription = bookingService.bookingsStream.listen((bookings) {
+      if (mounted) {
+        setState(() {
+          _filteredBookings = bookings.where((b) => b.cottageId == widget.cottageId).toList();
+        });
+      }
+    });
   }
+
+  @override
+  void dispose() {
+    _bookingsSubscription?.cancel();
+    super.dispose();
+  }
+
+  StreamSubscription? _bookingsSubscription;
 
   Future<void> _cancelBooking(String bookingId) async {
     setState(() => _isLoading = true);
@@ -102,24 +122,38 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
   Future<void> _createBooking(Booking booking) async {
     setState(() => _isLoading = true);
     try {
-      await Provider.of<BookingService>(context, listen: false)
+      print('Creating booking: ${booking.toJson()}');
+      
+      final createdBooking = await Provider.of<BookingService>(context, listen: false)
           .createBooking(booking);
+      
+      print('Booking created successfully: ${createdBooking.id}');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Бронирование успешно создано!')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Бронирование успешно создано!'),
+            backgroundColor: Colors.green,
+          ),
+        );
 
-      setState(() {
-        _bookingsFuture = Provider.of<BookingService>(context, listen: false)
-            .getBookingsByCottage(widget.cottageId);
-        _filteredBookings = [];
-      });
+        // Обновляем данные после создания бронирования
+        await _refreshData();
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e')),
-      );
+      print('Error creating booking: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -132,17 +166,17 @@ class _CottageDetailScreenState extends State<CottageDetailScreen> {
   void _showBookingDialog(BuildContext context, Cottage cottage, DateTime selectedDate) {
     showDialog(
       context: context,
-      builder: (context) => BookingFormDialog(
-        cottage: cottage,
+      builder: (context) => BookingDialog(
+        cottageId: cottage.id,
         selectedDate: selectedDate,
-        onSubmit: (booking) async {
+        onBookingCreated: (booking) async {
           await _createBooking(booking);
           // Обновляем список бронирований
-          setState(() {
+          if (mounted) {
             _bookingsFuture = Provider.of<BookingService>(context, listen: false)
                 .getBookingsByCottage(widget.cottageId);
             _filteredBookings = [];
-          });
+          }
         },
         bookingService: Provider.of<BookingService>(context, listen: false),
       ),

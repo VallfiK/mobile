@@ -1,3 +1,4 @@
+import 'dart:async'; // Для StreamController
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/booking.dart';
@@ -8,8 +9,22 @@ import 'api_client.dart';
 class BookingService {
   final ApiClient _apiClient;
   final String baseUrl = ApiConfig.baseUrl;
+  final Set<String> _pendingBookings = {};
+  final StreamController<List<Booking>> _bookingsController = StreamController.broadcast();
 
   BookingService(this._apiClient);
+
+  Stream<List<Booking>> get bookingsStream => _bookingsController.stream;
+
+  void _broadcastBookings(List<Booking> bookings) {
+    _bookingsController.add(bookings);
+  }
+
+  /// Принудительно обновляет список бронирований для коттеджа из БД и пушит в Stream
+  Future<void> refreshBookingsForCottage(String cottageId) async {
+    final freshBookings = await getBookingsByCottage(cottageId);
+    _broadcastBookings(freshBookings);
+  }
 
   Future<List<Booking>> getUserBookings() async {
     try {

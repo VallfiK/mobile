@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'package:table_calendar/table_calendar.dart';
 import '../models/booking.dart';
 import '../models/cottage.dart';
 import '../utils/date_extensions.dart';
+import '../widgets/booking_dialog.dart';
+import '../services/booking_service.dart';
 import 'booking_cancellation_dialog.dart';
 import 'booking_dialog.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +13,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import '../services/booking_service.dart';
 import 'dart:async';
+import 'package:intl/intl.dart';
 
 class CalendarView extends StatefulWidget {
   final Cottage cottage;
@@ -30,6 +34,7 @@ class CalendarView extends StatefulWidget {
 }
 
 class _CalendarViewState extends State<CalendarView> {
+  List<Booking> _currentBookings = []; // Актуальный список бронирований
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   Map<DateTime, List<Booking>> _groupedBookings = {};
@@ -38,6 +43,7 @@ class _CalendarViewState extends State<CalendarView> {
   Timer? _debounceTimer;
   final _bookingCache = <String, List<Booking>>{};
   final _dateAvailabilityCache = <String, bool>{};
+  bool _isCreatingBooking = false; // Добавляем флаг для предотвращения дублирования
 
   // Добавляем время заезда и выезда как константы
   static const checkOutTime = TimeOfDay(hour: 12, minute: 0);
@@ -46,16 +52,31 @@ class _CalendarViewState extends State<CalendarView> {
   @override
   void initState() {
     super.initState();
+    _currentBookings = List.from(widget.bookings); // начальное состояние
     _initializeLocale();
     _groupBookings();
+    
+    // Подписываемся на изменения бронирований
+    final bookingService = Provider.of<BookingService>(context, listen: false);
+    _bookingsSubscription = bookingService.bookingsStream.listen((bookings) {
+      if (mounted) {
+        setState(() {
+          _currentBookings = bookings;
+          _groupBookings();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _bookingsSubscription?.cancel();
     _debounceTimer?.cancel();
     _clearCaches();
     super.dispose();
   }
+
+  StreamSubscription? _bookingsSubscription;
 
   void _clearCaches() {
     _bookingCache.clear();
@@ -94,7 +115,7 @@ class _CalendarViewState extends State<CalendarView> {
     final Map<DateTime, List<Booking>> newGroupedBookings = {};
     
     // Сортируем бронирования по дате начала
-    final sortedBookings = List<Booking>.from(widget.bookings)
+    final sortedBookings = List<Booking>.from(_currentBookings)
       ..sort((a, b) => a.startDate?.compareTo(b.startDate ?? DateTime.now()) ?? 0);
     
     for (var booking in sortedBookings) {
@@ -158,7 +179,7 @@ class _CalendarViewState extends State<CalendarView> {
 
   List<Booking> _getBookingsForDay(DateTime day) {
     final normalizedDay = DateTime(day.year, day.month, day.day);
-    final bookings = widget.bookings.where((booking) {
+    final bookings = _currentBookings.where((booking) {
       if (booking.startDate == null || booking.endDate == null) return false;
       
       // Normalize booking dates to local time
@@ -441,29 +462,61 @@ class _CalendarViewState extends State<CalendarView> {
     }
   }
 
-  void _handleDateSelection(DateTime selectedDate) {
-    // Отменяем предыдущий таймер, если он есть
-    _debounceTimer?.cancel();
+  void _handleDateSelection(DateTime date) {
+    if (_isCreatingBooking) return; // Предотвращаем создание при активном процессе
     
-    // Создаем новый таймер с меньшей задержкой
-    _debounceTimer = Timer(const Duration(milliseconds: 200), () async {
+    if (_debounceTimer?.isActive ?? false) {
+      _debounceTimer!.cancel();
+    }
+
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      final cacheKey = _getCacheKey(date);
+      final isAvailable = _dateAvailabilityCache[cacheKey] ?? 
+        await _checkDateAvailability(date);
+
       if (!mounted) return;
-      
-      final isAvailable = await _checkDateAvailability(selectedDate);
-      if (!mounted) return;
-      
-      // Всегда вызываем onDateSelected, даже если дата занята
-      // Это позволит показать информацию о бронировании
-      widget.onDateSelected?.call(selectedDate);
-      
-      // Если дата доступна для бронирования, показываем сообщение
-      if (isAvailable) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Дата доступна для бронирования'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+
+      if (_selectedDay != date) {
+        setState(() => _selectedDay = date);
+        
+        if (widget.onDateSelected != null) {
+          final bookings = await widget.onDateSelected!(date);
+          setState(() => _groupedBookings[date] = bookings);
+        }
+      }
+
+      // Если дата доступна и компонент смонтирован, показываем диалог бронирования
+      if (isAvailable && mounted) {
+        await _showBookingDialog(date);
+      }
+    });
+  }
+
+  Future<void> _showBookingDialog(DateTime date) async {
+    if (_isCreatingBooking) return; // Предотвращаем создание при активном процессе
+    
+    setState(() => _isCreatingBooking = true);
+    
+    final bookingService = Provider.of<BookingService>(context, listen: false);
+    final dialog = BookingDialog(
+      cottageId: widget.cottage.id,
+      selectedDate: date,
+      onBookingCreated: (booking) {
+        setState(() {
+          _groupedBookings[date] = [...?_groupedBookings[date], booking];
+          _isCreatingBooking = false;
+        });
+      },
+      bookingService: bookingService,
+    );
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false, // Предотвращаем закрытие диалога при нажатии вне
+      builder: (context) => dialog,
+    ).then((_) {
+      if (mounted) {
+        setState(() => _isCreatingBooking = false);
       }
     });
   }
@@ -636,44 +689,59 @@ class _CalendarViewState extends State<CalendarView> {
                           itemBuilder: (context, index) {
                             // Если это последний элемент, проверяем возможность добавления нового заезда
                             if (index == selectedDayBookings.length) {
-                              // Проверяем, есть ли выезд в этот день
-                              bool hasCheckOut = selectedDayBookings.any((booking) =>
-                                booking.endDate.year == _selectedDay!.year &&
-                                booking.endDate.month == _selectedDay!.month &&
-                                booking.endDate.day == _selectedDay!.day
-                              );
+                            // Если это последний элемент, проверяем возможность добавления нового заезда
+                            bool hasCheckOut = selectedDayBookings.any((booking) =>
+                              booking.endDate.year == _selectedDay!.year &&
+                              booking.endDate.month == _selectedDay!.month &&
+                              booking.endDate.day == _selectedDay!.day
+                            );
 
-                              if (hasCheckOut) {
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                  child: ElevatedButton.icon(
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('Добавить заезд на 14:00'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    onPressed: () {
-                                      // Используем существующий диалог бронирования
-                                      showDialog(
-                                        context: context,
-                                        builder: (context) => BookingDialog(
-                                          cottageId: widget.cottage.id,
-                                          selectedDate: _selectedDay!,
-                                          onBookingCreated: (booking) {
-                                            setState(() {
-                                              _groupBookings();
-                                            });
-                                          },
-                                          bookingService: Provider.of<BookingService>(context, listen: false),
-                                        ),
-                                      );
-                                    },
+                            if (hasCheckOut) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Добавить заезд на 14:00'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
                                   ),
-                                );
-                              }
-                              return const SizedBox.shrink();
+                                  onPressed: _isCreatingBooking ? null : () async {
+                                    // Проверяем, не выполняется ли уже создание бронирования
+                                    if (_isCreatingBooking) {
+                                      print('Booking creation already in progress');
+                                      return;
+                                    }
+
+                                    setState(() {
+                                      _isCreatingBooking = true;
+                                    });
+
+                                    try {
+                                      await _showBookingDialog(_selectedDay!);
+                                    } catch (e) {
+                                      print('Error showing booking dialog: $e');
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Ошибка: $e'),
+                                            backgroundColor: Colors.red,
+                                          ),
+                                        );
+                                      }
+                                    } finally {
+                                      if (mounted) {
+                                        setState(() {
+                                          _isCreatingBooking = false;
+                                        });
+                                      }
+                                    }
+                                  },
+                                ),
+                              );
                             }
+                            return const SizedBox.shrink();
+                          }
 
                             final booking = selectedDayBookings[index];
                             // Для даты выезда показываем чип только если это последний день бронирования
@@ -759,11 +827,23 @@ class _CalendarViewState extends State<CalendarView> {
                                           'Количество гостей: ${booking.guests}',
                                           style: TextStyle(color: Colors.grey[600]),
                                         ),
-                                        if (booking.totalCost > 0)
+                                        if (booking.totalCost > 0) ...[
+                                          const SizedBox(height: 4),
                                           Text(
-                                            'Стоимость: ${booking.totalCost.toStringAsFixed(2)} руб.',
-                                            style: TextStyle(color: Colors.grey[600]),
+                                            'Общая стоимость: ${NumberFormat.currency(locale: 'ru_RU', symbol: '₽', decimalDigits: 0).format(booking.totalCost)}',
+                                            style: const TextStyle(fontWeight: FontWeight.w500),
                                           ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Предоплата: ${NumberFormat.currency(locale: 'ru_RU', symbol: '₽', decimalDigits: 0).format(booking.prepayment)}',
+                                            style: TextStyle(color: Colors.orange[700], fontSize: 13),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Остаток к оплате: ${NumberFormat.currency(locale: 'ru_RU', symbol: '₽', decimalDigits: 0).format(booking.totalPaid)}',
+                                            style: TextStyle(color: Colors.green[700], fontSize: 13, fontWeight: FontWeight.w500),
+                                          ),
+                                        ],
                                         if (booking.notes.isNotEmpty)
                                           Text(
                                             'Примечания: ${booking.notes}',
@@ -974,35 +1054,25 @@ class SplitDayCellPainter extends CustomPainter {
 
     // Draw the split cell if needed
     if (hasCheckIn && hasCheckOut) {
-      // Draw the check-out (free) half
+      // Левая половина — check-out (зелёный)
       paint.color = Colors.green.withOpacity(0.3);
-      
-      // Draw a semi-circle for check-out
-      final checkOutPath = Path()
-        ..moveTo(radius, 0)
-        ..lineTo(radius, radius * 2)
-        ..lineTo(0, radius * 2)
-        ..arcToPoint(
-          Offset(0, 0),
-          radius: Radius.circular(radius),
-          clockwise: false,
-        )
-        ..close();
-      
-      canvas.drawPath(checkOutPath, paint);
-      
-      // Draw the check-in half with status color
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        math.pi / 2, // 90°
+        math.pi,     // 180°
+        true,
+        paint,
+      );
+
+      // Правая половина — check-in (жёлтый/красный)
       paint.color = _getStatusColor(status).withOpacity(0.3);
-      
-      // Draw a semi-circle for check-in
-      final checkInPath = Path()
-        ..moveTo(radius, 0)
-        ..lineTo(radius * 2, 0)
-        ..lineTo(radius * 2, radius * 2)
-        ..lineTo(radius, radius * 2)
-        ..close();
-      
-      canvas.drawPath(checkInPath, paint);
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2, // -90°
+        math.pi,      // 180°
+        true,
+        paint,
+      );
     } else if (hasCheckIn) {
       // Only check-in
       paint.color = _getStatusColor(status).withOpacity(0.3);

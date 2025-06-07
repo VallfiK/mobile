@@ -504,10 +504,14 @@ router.post('/', async (req, res) => {
         const days = Math.ceil((parsedEndDate - parsedStartDate) / (1000 * 60 * 60 * 24));
         const totalCost = pricePerDay * days;
 
+        // Calculate remaining amount
+        const prepaymentAmount = parseFloat(prepayment) || 0;
+        const remainingAmount = totalCost - prepaymentAmount;
+
         const { rows } = await client.query(
             `INSERT INTO lesbaza.bookings 
-            (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, prepayment, created_at) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP) 
+            (cottage_id, guest_name, phone, email, check_in_date, check_out_date, guests, status, tariff_id, total_cost, notes, prepayment, total_paid, created_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP) 
             RETURNING 
                 booking_id as id,
                 cottage_id,
@@ -522,7 +526,8 @@ router.post('/', async (req, res) => {
                 notes,
                 total_cost,
                 tariff_id,
-                prepayment`,
+                prepayment,
+                total_paid`,
             [
                 cottageId, 
                 guestName.trim(), 
@@ -535,9 +540,12 @@ router.post('/', async (req, res) => {
                 numericTariffId,
                 totalCost,
                 notes.trim(),
-                parseFloat(prepayment) || 0
+                prepaymentAmount,
+                remainingAmount
             ]
         );
+        
+        console.log('Booking created with prepayment:', prepaymentAmount, 'and remaining amount:', remainingAmount);
         
         console.log('Booking created with prepayment:', rows[0].prepayment);
 
@@ -567,6 +575,8 @@ router.post('/', async (req, res) => {
             notes: rows[0].notes || '',
             totalCost: rows[0].total_cost || 0,
             prepayment: parseFloat(rows[0].prepayment) || 0,
+            totalPaid: parseFloat(rows[0].total_paid) || 0,
+            remainingAmount: (rows[0].total_cost || 0) - (parseFloat(rows[0].total_paid) || 0),
             tariffId: rows[0].tariff_id?.toString() || ''
         };
 
@@ -644,6 +654,15 @@ router.put('/:id/status', async (req, res) => {
         
         const bookingId = req.params.id;
         const { status } = req.body;
+
+        // Если статус становится 'checked_in', сбрасываем остаток (total_paid = total_cost)
+        if (status === 'checked_in') {
+            // При заселении сбрасываем total_paid в 0
+            await client.query(
+                'UPDATE lesbaza.bookings SET total_paid = 0 WHERE booking_id = $1',
+                [bookingId]
+            );
+        }
 
         // Проверяем, что статус допустимый
         const validStatuses = ['booked', 'checked_in', 'checked_out', 'cancelled'];

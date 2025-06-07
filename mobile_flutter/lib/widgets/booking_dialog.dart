@@ -28,19 +28,23 @@ class _BookingDialogState extends State<BookingDialog> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
+  final _prepaymentController = TextEditingController();
+  
   DateTime? _endDate;
   int _guests = 1;
   int? _selectedTariffId;
   List<Tariff> _tariffs = [];
   bool _isLoading = false;
+  bool _isCreatingBooking = false; // Добавляем флаг для предотвращения дублирования
   double _totalCost = 0;
   double _requiredDeposit = 0;
   double _remainingPayment = 0;
-  final _prepaymentController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    // Устанавливаем дату выезда на следующий день по умолчанию
+    _endDate = widget.selectedDate.add(const Duration(days: 1));
     _loadTariffs();
   }
 
@@ -64,10 +68,8 @@ class _BookingDialogState extends State<BookingDialog> {
         _isLoading = false;
       });
       
-      // Рассчитываем начальную стоимость, если выбрана дата выезда
-      if (_endDate != null) {
-        _calculateCost();
-      }
+      // Рассчитываем начальную стоимость
+      _calculateCost();
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
@@ -79,7 +81,7 @@ class _BookingDialogState extends State<BookingDialog> {
   }
 
   void _calculateCost() {
-    if (_endDate == null || _selectedTariffId == null) return;
+    if (_endDate == null || _selectedTariffId == null || _tariffs.isEmpty) return;
 
     final selectedTariff = _tariffs.firstWhere(
       (t) => int.tryParse(t.id) == _selectedTariffId,
@@ -130,52 +132,107 @@ class _BookingDialogState extends State<BookingDialog> {
   }
 
   Future<void> _createBooking() async {
+    // Проверяем, не выполняется ли уже создание бронирования
+    if (_isCreatingBooking) {
+      print('Booking creation already in progress, ignoring duplicate call');
+      return;
+    }
+
     if (!_formKey.currentState!.validate() || _endDate == null || _selectedTariffId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пожалуйста, заполните все обязательные поля')),
+      );
       return;
     }
 
     try {
-      setState(() => _isLoading = true);
+      setState(() {
+        _isLoading = true;
+        _isCreatingBooking = true; // Устанавливаем флаг
+      });
 
-      final selectedTariff = _tariffs.firstWhere(
-        (t) => int.tryParse(t.id) == _selectedTariffId,
-        orElse: () => _tariffs.first,
+      print('\n=== BOOKING DIALOG DEBUG ===');
+      print('Cottage ID: ${widget.cottageId}');
+      print('Guest Name: ${_guestNameController.text}');
+      print('Phone: ${_phoneController.text}');
+      print('Email: ${_emailController.text}');
+      print('Start Date: ${widget.selectedDate}');
+      print('End Date: $_endDate');
+      print('Guests: $_guests');
+      print('Selected Tariff ID: $_selectedTariffId');
+      print('Total Cost: $_totalCost');
+      print('Prepayment: ${_prepaymentController.text}');
+
+      // Нормализуем даты с правильным временем
+      final normalizedCheckInDate = DateTime(
+        widget.selectedDate.year,
+        widget.selectedDate.month,
+        widget.selectedDate.day,
+        14, // 14:00
       );
+      
+      final normalizedCheckOutDate = DateTime(
+        _endDate!.year,
+        _endDate!.month,
+        _endDate!.day,
+        12, // 12:00
+      );
+
+      print('Normalized Check-in: $normalizedCheckInDate');
+      print('Normalized Check-out: $normalizedCheckOutDate');
 
       final booking = Booking(
         id: '',
         cottageId: widget.cottageId,
-        startDate: widget.selectedDate,
-        endDate: _endDate!,
+        startDate: normalizedCheckInDate,
+        endDate: normalizedCheckOutDate,
         guests: _guests,
         status: 'booked',
-        guestName: _guestNameController.text,
-        phone: _phoneController.text,
-        email: _emailController.text,
-        notes: _notesController.text,
+        guestName: _guestNameController.text.trim(),
+        phone: _phoneController.text.trim(),
+        email: _emailController.text.trim(),
+        notes: _notesController.text.trim(),
         totalCost: _totalCost,
         prepayment: double.tryParse(_prepaymentController.text.replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '.')) ?? 0.0,
-        tariffId: selectedTariff.id.toString(),
+        tariffId: _selectedTariffId.toString(),
       );
 
+      print('Booking object created: ${booking.toJson()}');
+
       final createdBooking = await widget.bookingService.createBooking(booking);
+      // Принудительно обновляем данные с сервера
+      await widget.bookingService.refreshBookingsForCottage(widget.cottageId);
+      widget.onBookingCreated(createdBooking);
+      if (mounted) Navigator.of(context).pop();
 
       if (mounted) {
+        // Затем вызываем колбэк
         widget.onBookingCreated(createdBooking);
-        Navigator.of(context).pop();
+        
+        // И показываем уведомление
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Бронирование успешно создано!')),
+          const SnackBar(
+            content: Text('Бронирование успешно создано!'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
+      print('Error creating booking: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка создания бронирования: $e')),
+          SnackBar(
+            content: Text('Ошибка создания бронирования: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _isCreatingBooking = false; // Сбрасываем флаг
+        });
       }
     }
   }
@@ -188,92 +245,102 @@ class _BookingDialogState extends State<BookingDialog> {
       decimalDigits: 2,
     );
 
-    return Dialog(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.9,
-          maxHeight: MediaQuery.of(context).size.height * 0.9,
-        ),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Новое бронирование',
-                    style: Theme.of(context).textTheme.titleLarge,
+    return Dialog.fullscreen(
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Новое бронирование',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: ListTile(
+                    title: Text('Домик ID: ${widget.cottageId}'),
+                    subtitle: Text('Дата заезда: ${DateFormat('dd.MM.yyyy').format(widget.selectedDate)} в 14:00'),
                   ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _guestNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'ФИО гостя',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Пожалуйста, введите ФИО гостя';
-                      }
-                      return null;
-                    },
+                ),
+                const SizedBox(height: 16),
+
+                // ФИО гостя
+                TextFormField(
+                  controller: _guestNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'ФИО гостя *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person),
                   ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Пожалуйста, введите ФИО гостя';
+                    }
+                    return null;
+                  },
+                ),
                   const SizedBox(height: 16),
+                  
+                  // Телефон
                   TextFormField(
                     controller: _phoneController,
                     decoration: const InputDecoration(
-                      labelText: 'Телефон',
+                      labelText: 'Телефон *',
                       border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone),
                     ),
+                    keyboardType: TextInputType.phone,
                     validator: (value) {
-                      if (value == null || value.isEmpty) {
+                      if (value == null || value.trim().isEmpty) {
                         return 'Пожалуйста, введите телефон';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
+                  
+                  // Email
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(
                       labelText: 'Email',
                       border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.email),
                     ),
                     keyboardType: TextInputType.emailAddress,
                   ),
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Дата заезда: ${DateFormat('dd.MM.yyyy').format(widget.selectedDate)}',
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _endDate ?? widget.selectedDate.add(const Duration(days: 1)),
-                            firstDate: widget.selectedDate.add(const Duration(days: 1)),
-                            lastDate: widget.selectedDate.add(const Duration(days: 30)),
-                          );
-                          if (picked != null) {
-                            setState(() => _endDate = picked);
-                            _calculateCost();
-                          }
-                        },
-                        child: Text(_endDate == null
-                            ? 'Выбрать дату выезда'
-                            : 'Дата выезда: ${DateFormat('dd.MM.yyyy').format(_endDate!)}'),
-                      ),
-                    ],
+                  
+                  // Дата выезда
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Дата выезда *'),
+                    subtitle: Text(_endDate == null
+                        ? 'Выберите дату выезда'
+                        : '${DateFormat('dd.MM.yyyy').format(_endDate!)} в 12:00'),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _endDate ?? widget.selectedDate.add(const Duration(days: 1)),
+                        firstDate: widget.selectedDate.add(const Duration(days: 1)),
+                        lastDate: widget.selectedDate.add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setState(() => _endDate = picked);
+                        _calculateCost();
+                      }
+                    },
                   ),
                   const SizedBox(height: 16),
+                  
+                  // Количество гостей
                   Row(
                     children: [
-                      const Text('Количество гостей:'),
+                      const Text('Количество гостей: '),
                       const SizedBox(width: 16),
                       DropdownButton<int>(
                         value: _guests,
@@ -292,13 +359,15 @@ class _BookingDialogState extends State<BookingDialog> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  if (_isLoading)
-                    const CircularProgressIndicator()
-                  else
+                  
+                  // Тариф
+                  if (_isLoading && _tariffs.isEmpty)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_tariffs.isNotEmpty)
                     DropdownButtonFormField<int>(
                       value: _selectedTariffId,
                       decoration: const InputDecoration(
-                        labelText: 'Тариф',
+                        labelText: 'Тариф *',
                         border: OutlineInputBorder(),
                       ),
                       items: _tariffs
@@ -319,12 +388,15 @@ class _BookingDialogState extends State<BookingDialog> {
                       },
                     ),
                   const SizedBox(height: 16),
+                  
+                  // Расчет стоимости
                   if (_totalCost > 0) ...[
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,51 +440,69 @@ class _BookingDialogState extends State<BookingDialog> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  TextFormField(
-                    controller: _notesController,
-                    decoration: const InputDecoration(
-                      labelText: 'Примечания',
-                      border: OutlineInputBorder(),
-                    ),
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: 16),
+                  
+                  // Предоплата
                   TextFormField(
                     controller: _prepaymentController,
                     decoration: const InputDecoration(
-                      labelText: 'Предоплата',
+                      labelText: 'Предоплата *',
                       hintText: 'Введите сумму предоплаты',
                       border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.attach_money),
                     ),
                     keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Пожалуйста, введите сумму предоплаты';
+                      }
+                      final amount = double.tryParse(value.replaceAll(',', '.'));
+                      if (amount == null || amount < 0) {
+                        return 'Введите корректную сумму';
+                      }
+                      return null;
+                    },
                     onChanged: (value) {
                       // Обновляем оставшуюся сумму при изменении предоплаты
                       if (value.isNotEmpty) {
-                        final prepayment = double.tryParse(value) ?? 0.0;
+                        final prepayment = double.tryParse(value.replaceAll(',', '.')) ?? 0.0;
                         setState(() {
                           _remainingPayment = _totalCost - prepayment;
                         });
                       }
                     },
                   ),
+                  const SizedBox(height: 16),
+                  
+                  // Примечания
+                  TextFormField(
+                    controller: _notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Примечания',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.note),
+                    ),
+                    maxLines: 2,
+                  ),
                   const SizedBox(height: 24),
+                  
+                  // Кнопки
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
                         child: const Text('Отмена'),
                       ),
                       const SizedBox(width: 16),
-                      ElevatedButton(
-                        onPressed: _isLoading ? null : _createBooking,
+                      FilledButton(
+                        onPressed: (_isLoading || _isCreatingBooking) ? null : _createBooking,
                         child: _isLoading
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Text('Создать'),
+                            : const Text('Создать бронирование'),
                       ),
                     ],
                   ),
@@ -424,4 +514,4 @@ class _BookingDialogState extends State<BookingDialog> {
       ),
     );
   }
-} 
+}
